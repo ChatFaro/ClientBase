@@ -3,6 +3,7 @@ package cn.clientbase.module.impl.visual;
 import cn.clientbase.event.base.annotation.EventTarget;
 import cn.clientbase.event.impl.ChatGUIEvent;
 import cn.clientbase.event.impl.Render2DEvent;
+import cn.clientbase.event.impl.RenderSkiaEvent;
 import cn.clientbase.module.Category;
 import cn.clientbase.module.Module;
 import cn.clientbase.module.value.impl.ColorValue;
@@ -36,6 +37,14 @@ public class HUD extends Module {
                 drag.updatePos();
             }
         }
+    }
+
+    @EventTarget
+    public void onRenderSkia(RenderSkiaEvent event) {
+        if (mc.player ==  null || mc.world == null) return;
+
+        // test code
+        instance.getFontManager().getMediumFont(16).drawShadowString(event.getCanvas(), "操你妈逼", 50, 50, getColor());
     }
 
     @EventTarget

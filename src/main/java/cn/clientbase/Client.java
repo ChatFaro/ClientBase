@@ -6,6 +6,8 @@ import cn.clientbase.event.base.EventManager;
 import cn.clientbase.manager.TargetManager;
 import cn.clientbase.module.ModuleManager;
 import cn.clientbase.ui.clickgui.ClickGUIScreen;
+import cn.clientbase.ui.font.FontManager;
+import cn.clientbase.ui.skia.SkiaManager;
 import cn.clientbase.util.IMinecraft;
 import lombok.Getter;
 import org.apache.logging.log4j.Logger;
@@ -27,6 +29,8 @@ public class Client implements IMinecraft {
     private ConfigManager configManager;
     private TargetManager targetManager;
     private ClickGUIScreen clickGUIScreen;
+    private SkiaManager skiaManager;
+    private FontManager fontManager;
 
     public void init() {
         eventManager =  new EventManager();
@@ -36,9 +40,13 @@ public class Client implements IMinecraft {
         targetManager = new TargetManager();
 
         clickGUIScreen  = new ClickGUIScreen();
+        skiaManager = new SkiaManager();
+        fontManager  = new FontManager();
     }
 
     public void shutdown() {
         configManager.saveAll();
+        skiaManager.destroy();
+        fontManager.destroy();
     }
 }

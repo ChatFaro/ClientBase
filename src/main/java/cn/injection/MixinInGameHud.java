@@ -19,5 +19,6 @@ public abstract class MixinInGameHud implements IMinecraft {
 
         Render2DEvent event = new Render2DEvent(context, tickCounter.getTickDelta(true));
         instance.getEventManager().call(event);
+        instance.getSkiaManager().render();
     }
 }
