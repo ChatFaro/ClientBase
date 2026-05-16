@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "clientbase",
+  "version": "${version}",
+  "name": "ClientBase",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {},
+  "mixins": [
+    "clientbase.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
