@@ -4,6 +4,7 @@ import cn.clientbase.Client;
 import cn.clientbase.event.base.annotation.EventTarget;
 import cn.clientbase.event.impl.KeyEvent;
 import cn.clientbase.module.impl.client.ClientSetting;
+import cn.clientbase.module.impl.combat.KillAura;
 import cn.clientbase.module.impl.combat.Velocity;
 import cn.clientbase.module.impl.misc.Timer;
 import cn.clientbase.module.impl.movement.FastWeb;
@@ -39,6 +40,8 @@ public class ModuleManager implements IMinecraft {
                  new WaterMark(),
                  new Strafe(),
                  new WorldTweaks(),
+                 new KillAura(),
+                 new Animation(),
                  new ClientSetting(),
                  new ESP(),
                  new FastWeb()

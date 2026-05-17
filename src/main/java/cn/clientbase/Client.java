@@ -3,6 +3,7 @@ package cn.clientbase;
 import cn.clientbase.command.CommandManager;
 import cn.clientbase.config.ConfigManager;
 import cn.clientbase.event.base.EventManager;
+import cn.clientbase.manager.RotationManager;
 import cn.clientbase.manager.TargetManager;
 import cn.clientbase.module.ModuleManager;
 import cn.clientbase.ui.clickgui.ClickGUIScreen;
@@ -28,6 +29,7 @@ public class Client implements IMinecraft {
     private CommandManager commandManager;
     private ConfigManager configManager;
     private TargetManager targetManager;
+    private RotationManager rotationManager;
     private ClickGUIScreen clickGUIScreen;
     private SkiaManager skiaManager;
     private FontManager fontManager;
@@ -38,6 +40,7 @@ public class Client implements IMinecraft {
         commandManager = new CommandManager();
         configManager = new ConfigManager();
         targetManager = new TargetManager();
+        rotationManager  = new RotationManager();
 
         clickGUIScreen  = new ClickGUIScreen();
         skiaManager = new SkiaManager();

@@ -3,6 +3,7 @@ package cn.injection;
 import cn.clientbase.event.impl.JumpEvent;
 import cn.clientbase.event.impl.MoveMathEvent;
 import cn.clientbase.event.impl.RotationEvent;
+import cn.clientbase.module.impl.visual.Animation;
 import cn.clientbase.util.IMinecraft;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
@@ -12,6 +13,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(LivingEntity.class)
 public abstract class MixinLivingEntity implements IMinecraft {
@@ -52,5 +54,14 @@ public abstract class MixinLivingEntity implements IMinecraft {
         }
 
         return entity.getYaw();
+    }
+
+    @Inject(method = "getHandSwingDuration", at = @At("HEAD"), cancellable = true)
+    public void getHandSwingDuration(CallbackInfoReturnable<Integer> cir) {
+        Animation animation = instance.getModuleManager().getModule(Animation.class);
+
+        if (animation.isEnabled()) {
+            cir.setReturnValue(6 + animation.swingSpeed.getValue().intValue());
+        }
     }
 }

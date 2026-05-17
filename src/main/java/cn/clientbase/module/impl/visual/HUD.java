@@ -44,7 +44,7 @@ public class HUD extends Module {
         if (mc.player ==  null || mc.world == null) return;
 
         // test code
-        instance.getFontManager().getMediumFont(16).drawShadowString(event.getCanvas(), "操你妈逼", 50, 50, getColor());
+        instance.getFontManager().getMediumFont(16).drawShadowString(event.getCanvas(), "DSJ#8963", 50, 50, getColor());
     }
 
     @EventTarget

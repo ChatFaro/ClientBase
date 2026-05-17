@@ -3,7 +3,9 @@
   "minVersion": "0.8",
   "package": "cn.injection",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [],
+  "mixins": [
+    "accessor.EntityAccessor"
+  ],
   "client": [
     "MixinBiome",
     "MixinChatInputSuggestor",
@@ -15,6 +17,7 @@
     "MixinDynamic",
     "MixinEntity",
     "MixinGameRenderer",
+    "MixinHeldItemRenderer",
     "MixinInGameHud",
     "MixinKeyboard",
     "MixinKeyboardInput",
