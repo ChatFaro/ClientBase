@@ -42,9 +42,6 @@ public class HUD extends Module {
     @EventTarget
     public void onRenderSkia(RenderSkiaEvent event) {
         if (mc.player ==  null || mc.world == null) return;
-
-        // test code
-        instance.getFontManager().getMediumFont(16).drawShadowString(event.getCanvas(), "DSJ#8963", 50, 50, getColor());
     }
 
     @EventTarget

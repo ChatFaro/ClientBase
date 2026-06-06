@@ -8,6 +8,7 @@ import cn.clientbase.module.impl.combat.KillAura;
 import cn.clientbase.module.impl.combat.Velocity;
 import cn.clientbase.module.impl.misc.Timer;
 import cn.clientbase.module.impl.movement.FastWeb;
+import cn.clientbase.module.impl.movement.Scaffold;
 import cn.clientbase.module.impl.movement.Sprint;
 import cn.clientbase.module.impl.movement.Strafe;
 import cn.clientbase.module.impl.player.NoJumpDelay;
@@ -31,20 +32,21 @@ public class ModuleManager implements IMinecraft {
                  new Timer(),
                  new NoJumpDelay(),
                  new Velocity(),
-                 new ClickGUI(),
-                 new HUD(),
+                 new ClickGUI(),                 new HUD(),
                  new NoHurtCam(),
                  new NoFog(),
                  new Brightness(),
                  new ModuleList(),
                  new WaterMark(),
+                 new CustomText(),
                  new Strafe(),
                  new WorldTweaks(),
                  new KillAura(),
                  new Animation(),
                  new ClientSetting(),
                  new ESP(),
-                 new FastWeb()
+                 new FastWeb(),
+                 new Scaffold()
         );
 
         sortModules();

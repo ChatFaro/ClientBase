@@ -1,5 +1,6 @@
 package cn.clientbase.ui.font;
 
+import cn.clientbase.Client;
 import cn.clientbase.ui.font.base.SkiaFont;
 import org.jetbrains.skija.Data;
 import org.jetbrains.skija.Typeface;
@@ -32,15 +33,28 @@ public class FontManager {
     }
 
     public SkiaFont create(String name, int size) {
-        try (InputStream is = SkiaFont.class.getResourceAsStream("/assets/clientbase/fonts/" + name)) {
+        String path = "/assets/clientbase/fonts/" + name;
+        try (InputStream is = SkiaFont.class.getResourceAsStream(path)) {
             if (is == null) {
-                throw new RuntimeException("Font resources not found: " + name);
+                Client.logger.error("Font resource not found on classpath: {} (is the ttf packaged under resources?)", path);
+                return new SkiaFont(Typeface.makeDefault(), size);
             }
 
-            try (Data fontData = Data.makeFromBytes(is.readAllBytes())) {
-                return new SkiaFont(Typeface.makeFromData(fontData), size);
+            byte[] bytes = is.readAllBytes();
+            // NOTE: Typeface.makeFromData references the underlying SkData; if the Data is
+            // closed (e.g. via try-with-resources) before the typeface is used, the native
+            // buffer is freed and every glyph renders as tofu. Keep the Data alive for the
+            // lifetime of the typeface instead of closing it here.
+            Data fontData = Data.makeFromBytes(bytes);
+            Typeface typeface = Typeface.makeFromData(fontData);
+            if (typeface == null) {
+                Client.logger.error("Skija failed to parse font (returned null typeface): {}", path);
+                fontData.close();
+                return new SkiaFont(Typeface.makeDefault(), size);
             }
-        } catch (Exception ignored) {
+            return new SkiaFont(typeface, size);
+        } catch (Throwable t) {
+            Client.logger.error("Failed to load font {}: {}", path, t.toString(), t);
             return new SkiaFont(Typeface.makeDefault(), size);
         }
     }

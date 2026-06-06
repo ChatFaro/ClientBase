@@ -51,6 +51,24 @@ public class ClickGUIScreen extends Screen implements IMinecraft {
     }
 
     @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        for (Panel panel : panels) {
+            if (panel.keyPressed(keyCode, scanCode, modifiers)) return true;
+        }
+
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean charTyped(char chr, int modifiers) {
+        for (Panel panel : panels) {
+            if (panel.charTyped(chr, modifiers)) return true;
+        }
+
+        return super.charTyped(chr, modifiers);
+    }
+
+    @Override
     public boolean shouldPause() {
         return false;
     }

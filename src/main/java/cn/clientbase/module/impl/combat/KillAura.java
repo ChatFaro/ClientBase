@@ -247,6 +247,15 @@ public class KillAura extends Module {
     private long getCps() {
         long min = minCps.getValue().longValue();
         long max = maxCps.getValue().longValue();
+
+        // Sync with Velocity NoXZ: while it is burst-attacking, drop our own CPS by the
+        // amount it just fired so the two don't double-hit and spike total CPS.
+        if (Velocity.isAttacking) {
+            min = Math.max(1, min - Velocity.attackCount);
+            max = Math.max(1, max - Velocity.attackCount);
+            if (min > max) min = max;
+        }
+
         return MathUtil.getRandomInRange(min, max);
     }
 

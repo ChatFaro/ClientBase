@@ -70,4 +70,20 @@ public class Panel implements IMinecraft {
             buttons.forEach(btn -> btn.mouseReleased(mouseX, mouseY, button));
         }
     }
+
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (!open) return false;
+        for (ModuleButton btn : buttons) {
+            if (btn.keyPressed(keyCode, scanCode, modifiers)) return true;
+        }
+        return false;
+    }
+
+    public boolean charTyped(char chr, int modifiers) {
+        if (!open) return false;
+        for (ModuleButton btn : buttons) {
+            if (btn.charTyped(chr, modifiers)) return true;
+        }
+        return false;
+    }
 }

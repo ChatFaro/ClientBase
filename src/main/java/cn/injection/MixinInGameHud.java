@@ -19,6 +19,13 @@ public abstract class MixinInGameHud implements IMinecraft {
 
         Render2DEvent event = new Render2DEvent(context, tickCounter.getTickDelta(true));
         instance.getEventManager().call(event);
+
+        // Flush any buffered 2D draws (notably text from DrawContext#drawText, which is
+        // batched into the immediate buffer rather than drawn instantly) BEFORE Skia runs.
+        // SkiaManager#render dirties GL state (glClear, resetGLAll, texture/blend binds), so
+        // text flushed afterwards loses its glyph-atlas texture and renders as black boxes.
+        context.draw();
+
         instance.getSkiaManager().render();
     }
 }

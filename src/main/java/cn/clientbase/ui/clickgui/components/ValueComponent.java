@@ -16,6 +16,10 @@ public abstract class ValueComponent {
     public abstract void mouseClicked(int mouseX, int mouseY, int button, float x, float y, float width);
     public void mouseReleased(int mouseX, int mouseY, int button) {}
 
+    /** Return true if the key/char was consumed (e.g. a focused text field). */
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) { return false; }
+    public boolean charTyped(char chr, int modifiers) { return false; }
+
     protected boolean hovered(int mouseX, int mouseY, float x, float y, float width, float height) {
         return mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + height;
     }

@@ -36,6 +36,8 @@ public class ModuleButton {
                 components.add(new ColorComponent(color));
             } else if (value instanceof MultiBoolValue multi) {
                 components.add(new MultiBoolComponent(multi));
+            } else if (value instanceof StringValue str) {
+                components.add(new StringComponent(str));
             }
         }
     }
@@ -80,5 +82,21 @@ public class ModuleButton {
         if (expanded) {
             components.forEach(c -> c.mouseReleased(mouseX, mouseY, button));
         }
+    }
+
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (!expanded) return false;
+        for (ValueComponent comp : components) {
+            if (comp.keyPressed(keyCode, scanCode, modifiers)) return true;
+        }
+        return false;
+    }
+
+    public boolean charTyped(char chr, int modifiers) {
+        if (!expanded) return false;
+        for (ValueComponent comp : components) {
+            if (comp.charTyped(chr, modifiers)) return true;
+        }
+        return false;
     }
 }

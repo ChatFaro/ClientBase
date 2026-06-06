@@ -7,6 +7,12 @@ plugins {
 version = project.mod_version
 group = project.maven_group
 
+// Pin Lombok to a version that supports the JDK running Gradle (e.g. JDK 25).
+// The freefair plugin 8.6 ships an older Lombok that fails to initialize on newer JDKs.
+lombok {
+    version = "1.18.38"
+}
+
 base {
     archivesName = project.archives_base_name
 }
