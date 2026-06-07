@@ -33,6 +33,15 @@ public class Client implements IMinecraft {
      * {@code ClientLevelPatch} drain). Used by Scaffold's clutch path to inject
      * an extra rotation packet and re-run its tick logic.
      */
+
+    /*
+    Todo List:
+    1.Fix Scaffold
+    2.Fix Velocity
+    3.Add KeepSprint
+    4.Add ChestStealer and InventoryManager
+     */
+
     public static final ConcurrentLinkedQueue<Runnable> delayPackets = new ConcurrentLinkedQueue<>();
 
     private EventManager eventManager;

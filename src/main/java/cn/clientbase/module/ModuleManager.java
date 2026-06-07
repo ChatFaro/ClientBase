@@ -11,6 +11,8 @@ import cn.clientbase.module.impl.movement.FastWeb;
 import cn.clientbase.module.impl.movement.Scaffold;
 import cn.clientbase.module.impl.movement.Sprint;
 import cn.clientbase.module.impl.movement.Strafe;
+import cn.clientbase.module.impl.player.ChestStealer;
+import cn.clientbase.module.impl.player.InventoryManager;
 import cn.clientbase.module.impl.player.NoJumpDelay;
 import cn.clientbase.module.impl.visual.*;
 import cn.clientbase.module.value.Value;
@@ -31,6 +33,8 @@ public class ModuleManager implements IMinecraft {
                  new Sprint(),
                  new Timer(),
                  new NoJumpDelay(),
+                 new ChestStealer(),
+                 new InventoryManager(),
                  new Velocity(),
                  new ClickGUI(),                 new HUD(),
                  new NoHurtCam(),

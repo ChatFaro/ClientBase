@@ -47,6 +47,7 @@ public class KillAura extends Module {
     private final ModeValue autoBlockMode = new ModeValue("AutoBlock Mode", "None", "None", "Fake", "Vanilla");
     private final NumberValue rotationSpeed = new NumberValue("Rotation Speed", 180, 0, 180, 5);
     private final ModeValue movementFixMode = new ModeValue("MovementFix Mode", "None", "None", "Silent", "Strict");
+    private final cn.clientbase.module.value.impl.BoolValue keepSprint = new cn.clientbase.module.value.impl.BoolValue("Keep Sprint", true);
 
     private final List<LivingEntity> targets = new ArrayList<>();
     private final TimerUtil switchTimer = new TimerUtil();
@@ -77,7 +78,6 @@ public class KillAura extends Module {
         rotations = null;
         targets.clear();
         target = null;
-
         unBlock();
     }
 
@@ -120,10 +120,8 @@ public class KillAura extends Module {
     public void onLivingUpdate(LivingUpdateEvent event) {
         if (mc.player == null || mc.world == null) return;
 
-        if (target != null) {
-            if (RotationUtil.getDistanceToEntity(target) <= rotationRange.getValue()) {
-                rotations = RotationUtil.nearestRotation(target.getBoundingBox());
-            }
+        if (target != null && RotationUtil.getDistanceToEntity(target) <= rotationRange.getValue()) {
+            rotations = RotationUtil.nearestRotation(target.getBoundingBox());
         }
     }
 
@@ -158,13 +156,28 @@ public class KillAura extends Module {
     private void attack(LivingEntity entity) {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
 
-        if (attackMode.is("Packet")) {
-            PacketUtil.sendPacket(PlayerInteractEntityC2SPacket.attack(entity, mc.player.isSneaking()));
+        if (keepSprint.getValue()) {
+            boolean wasSprinting = mc.player.isSprinting();
+            if (wasSprinting) mc.player.setSprinting(false);
+            if (attackMode.is("Packet")) {
+                PacketUtil.sendPacket(PlayerInteractEntityC2SPacket.attack(entity, mc.player.isSneaking()));
+            } else {
+                mc.interactionManager.attackEntity(mc.player, entity);
+            }
+            mc.player.swingHand(Hand.MAIN_HAND);
+            if (wasSprinting) {
+                Vec3d v = mc.player.getVelocity();
+                mc.player.setVelocity(v.x * 0.6, v.y, v.z * 0.6);
+                mc.player.setSprinting(true);
+            }
         } else {
-            mc.interactionManager.attackEntity(mc.player, entity);
+            if (attackMode.is("Packet")) {
+                PacketUtil.sendPacket(PlayerInteractEntityC2SPacket.attack(entity, mc.player.isSneaking()));
+            } else {
+                mc.interactionManager.attackEntity(mc.player, entity);
+            }
+            mc.player.swingHand(Hand.MAIN_HAND);
         }
-
-        mc.player.swingHand(Hand.MAIN_HAND);
     }
 
     public void block() {

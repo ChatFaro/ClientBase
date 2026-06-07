@@ -26,6 +26,7 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.*;
+import org.lwjgl.glfw.GLFW;
 
 import java.awt.Color;
 
@@ -152,7 +153,13 @@ public class Scaffold extends Module {
         if (slot != -1 && mc.player.getInventory().selectedSlot != slot)
             mc.player.getInventory().selectedSlot = slot;
 
-        boolean jumpHeld = mc.options.jumpKey.isPressed();
+        // Read physical key state like OpenZen's InputConstants.isKeyDown — so our own
+        // setPressed(true) for TellyBridge auto-jump does NOT pollute this flag.
+        net.minecraft.client.util.InputUtil.Key boundKey =
+                net.minecraft.client.util.InputUtil.fromTranslationKey(
+                        mc.options.jumpKey.getBoundKeyTranslationKey());
+        boolean jumpHeld = boundKey.getCategory() == net.minecraft.client.util.InputUtil.Type.KEYSYM
+                && GLFW.glfwGetKey(mc.getWindow().getHandle(), boundKey.getCode()) == GLFW.GLFW_PRESS;
 
         // --- targetYLevel ---
         if (targetYLevel == -1
@@ -179,6 +186,8 @@ public class Scaffold extends Module {
             }
         }
         if (mc.player.isOnGround()) canBuildNow = true;
+        // TellyBridge/OldTelly never need clutch protection — they auto-jump
+        if (mode.is("Telly Bridge") || mode.is("Old Telly")) canBuildNow = true;
 
         // --- reference rotation ---
         float refYaw   = RotationManager.prevRotation != null ? RotationManager.prevRotation.getYaw()   : mc.player.getYaw();
@@ -196,27 +205,29 @@ public class Scaffold extends Module {
             return;
         }
 
-        // --- clutch delayPackets path (OpenZen) ---
-        if (clutch.getValue() && (!canBuildNow || velocityDelay > 0) && rotationDelay <= 8) {
-            Rotation toBlock       = RotationUtil.rotationToBlock(targetSupport, 1.0f);
+        // --- clutch delayPackets path (OpenZen verbatim, not used in TellyBridge) ---
+        if (clutch.getValue() && !mode.is("Telly Bridge") && !mode.is("Old Telly")
+                && (!canBuildNow || velocityDelay > 0) && rotationDelay <= 8) {
+            Rotation toBlock        = RotationUtil.rotationToBlock(targetSupport, 1.0f);
             Rotation previousTarget = RotationManager.targetRotation;
             rots.setYawPitch(toBlock.getYaw(), toBlock.getPitch());
             RotationManager.targetRotation = rots;
             rotationDelay++;
-
-            final boolean onGround           = mc.player.isOnGround();
-            final boolean horizontalCollision = mc.player.horizontalCollision;
             Client.delayPackets.add(() -> {});
             Client.delayPackets.add(() -> {
                 if (mc.player == null) return;
                 if (RotationManager.prevSentRotation == null) RotationManager.prevSentRotation = new Rotation();
                 RotationManager.prevSentRotation.setYawPitch(toBlock.getYaw(), toBlock.getPitch());
+                // OpenZen: add 720 to yaw to flag as clutch packet
+                float sendYaw = toBlock.getYaw();
+                if (sendYaw > -360.0f && sendYaw < 360.0f) sendYaw += 720.0f;
                 boolean shouldSend = previousTarget == null || previousTarget.getYaw() != toBlock.getYaw();
                 if (shouldSend)
                     PacketUtil.sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
-                            toBlock.getYaw(), toBlock.getPitch(), onGround, horizontalCollision));
+                            sendYaw, toBlock.getPitch(), mc.player.isOnGround(), mc.player.horizontalCollision));
                 doSnap();
-                onTick(event);
+                // NOTE: no recursive onTick call — MixinClientWorld drains one packet per entity tick,
+                // which naturally re-invokes the normal tick flow next frame.
             });
             return;
         }
@@ -233,8 +244,8 @@ public class Scaffold extends Module {
         }
         rots.setPitch(correctRotation.getPitch());
 
-        // sneak timer
-        if (sneak.getValue()) {
+        // sneak timer — Normal mode only (OpenZen: not used in Telly/KeepY)
+        if (sneak.getValue() && mode.is("Normal")) {
             eagleTimer++;
             if (eagleTimer == 18) {
                 if (mc.player.isSprinting()) { mc.options.sprintKey.setPressed(false); mc.player.setSprinting(false); }
@@ -245,21 +256,15 @@ public class Scaffold extends Module {
             }
         }
 
-        // --- mode-specific ---
+        // --- mode-specific (OpenZen verbatim) ---
         if (mode.is("Telly Bridge") || mode.is("Old Telly")) {
-            // OpenZen: on the ground while moving → skip placement this tick
-            if (airTicks < 1 && MovementUtil.isMoving()) {
-                if (mode.is("Old Telly")) rots.setYaw(mc.player.getYaw());
-                lastRots.setYawPitch(rots.getYaw(), rots.getPitch());
-                return;
-            }
-            // In the air: place immediately using the rotation we just set
+            mc.options.jumpKey.setPressed(MovementUtil.isMoving() || jumpHeld);
+            if (mode.is("Old Telly")) rots.setYaw(mc.player.getYaw());
             tryPlace();
         } else if (mode.is("Keep Y")) {
             mc.options.jumpKey.setPressed(MovementUtil.isMoving() || jumpHeld);
             tryPlace();
         } else {
-            // Normal
             if (eagle.getValue())
                 mc.options.sneakKey.setPressed(mc.player.isOnGround() && isOnBlockEdge(0.3f));
             if (snap.getValue() && !jumpHeld) resetSnap();
