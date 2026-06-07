@@ -284,7 +284,7 @@ public class Scaffold extends Module {
         if (mc.currentScreen != null || !haveTarget) return;
         boolean canRayTrace = RayTraceUtil.canRayTrace(rots, targetFace, targetSupport, false);
         if (!canBuildNow && !isPlacementReachable()) return;
-        if (rotationDelay <= 0 && !mode.is("Old Telly") && !canRayTrace) return;
+        if (rotationDelay <= 0 && !mode.is("Old Telly") && !mode.is("Telly Bridge") && !canRayTrace) return;
         doSnap();
     }
 
@@ -292,7 +292,6 @@ public class Scaffold extends Module {
         if (!haveTarget || mc.player == null || mc.interactionManager == null) return;
         if (!BlockUtil.isPlaceable(mc.player.getMainHandStack())) return;
         if (targetFace == null) return;
-        // OpenZen: skip UP-face placement in air while moving (except Normal)
         if (targetFace == Direction.UP && !mc.player.isOnGround()
                 && MovementUtil.isMoving() && !mc.options.jumpKey.isPressed()
                 && !mode.is("Normal")) return;
