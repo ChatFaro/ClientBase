@@ -13,6 +13,8 @@ import cn.clientbase.util.IMinecraft;
 import lombok.Getter;
 import org.apache.logging.log4j.Logger;
 
+import java.util.concurrent.ConcurrentLinkedQueue;
+
 /**
  * Client Base.
  * @author DSJ
@@ -23,6 +25,15 @@ public class Client implements IMinecraft {
     public static Logger logger;
     public static String name = "Client Base";
     public static String version = "Alpha";
+
+    /**
+     * FIFO queue of deferred player actions, drained one-per-tick inside
+     * {@code MixinClientWorld.tickEntity} BEFORE the local player ticks
+     * (faithful port of OpenZen's {@code ClientBase.delayPackets} +
+     * {@code ClientLevelPatch} drain). Used by Scaffold's clutch path to inject
+     * an extra rotation packet and re-run its tick logic.
+     */
+    public static final ConcurrentLinkedQueue<Runnable> delayPackets = new ConcurrentLinkedQueue<>();
 
     private EventManager eventManager;
     private ModuleManager moduleManager;

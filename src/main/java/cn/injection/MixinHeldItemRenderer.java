@@ -2,6 +2,7 @@ package cn.injection;
 
 import cn.clientbase.module.impl.combat.KillAura;
 import cn.clientbase.module.impl.visual.Animation;
+import cn.clientbase.event.impl.UpdateHeldItemEvent;
 import cn.clientbase.util.IMinecraft;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.render.OverlayTexture;
@@ -20,6 +21,7 @@ import net.minecraft.util.math.RotationAxis;
 import org.spongepowered.asm.mixin.*;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(HeldItemRenderer.class)
@@ -43,6 +45,14 @@ public abstract class MixinHeldItemRenderer implements IMinecraft {
     protected abstract void applyEatOrDrinkTransformation(MatrixStack matrices, float tickDelta, Arm arm, ItemStack stack, PlayerEntity player);
     @Shadow
     protected abstract void applyBrushTransformation(MatrixStack matrices, float tickDelta, Arm arm, ItemStack stack, PlayerEntity player, float equipProgress);
+
+    @ModifyVariable(method = "renderFirstPersonItem", at = @At("HEAD"), argsOnly = true)
+    private ItemStack spoofHeldItem(ItemStack item, AbstractClientPlayerEntity player, float tickDelta, float pitch, Hand hand) {
+        if (player != mc.player) return item;
+        UpdateHeldItemEvent event = new UpdateHeldItemEvent(hand, item);
+        instance.getEventManager().call(event);
+        return event.getItemStack();
+    }
 
     @Inject(method = "renderFirstPersonItem", at = @At("HEAD"), cancellable = true)
     private void renderFirstPersonItem(AbstractClientPlayerEntity player, float tickDelta, float pitch, Hand hand, float swingProgress, ItemStack item, float equipProgress, MatrixStack matrices, VertexConsumerProvider vertexConsumers, int light, CallbackInfo ci) {

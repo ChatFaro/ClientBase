@@ -1,284 +1,532 @@
 package cn.clientbase.module.impl.movement;
 
+import cn.clientbase.Client;
+import cn.clientbase.event.base.annotation.EventPriority;
 import cn.clientbase.event.base.annotation.EventTarget;
-import cn.clientbase.event.impl.MotionEvent;
-import cn.clientbase.event.impl.MoveInputEvent;
-import cn.clientbase.event.impl.UpdateEvent;
+import cn.clientbase.event.impl.*;
+import cn.clientbase.manager.RotationManager;
 import cn.clientbase.module.Category;
 import cn.clientbase.module.Module;
 import cn.clientbase.module.value.impl.BoolValue;
 import cn.clientbase.module.value.impl.ModeValue;
 import cn.clientbase.module.value.impl.NumberValue;
-import cn.clientbase.util.player.BlockUtil;
-import cn.clientbase.util.player.MovementUtil;
+import cn.clientbase.util.misc.MathUtil;
+import cn.clientbase.util.misc.ReflectionUtil;
+import cn.clientbase.util.network.PacketUtil;
+import cn.clientbase.util.player.*;
+import cn.clientbase.util.render.RenderUtil;
+import com.mojang.blaze3d.systems.RenderSystem;
 import lombok.Getter;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.item.BlockItem;
+import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.*;
 
-/**
- * Auto block-bridge. The "Telly Bridge" mode bridges while bunny-hopping: it holds jump
- * whenever moving, and during the airborne window snaps the rotation toward the block below
- * and places it. Rotation is clamped per tick and given a tiny alternating jitter whenever it
- * would otherwise sit perfectly still, which keeps the look motion from reading as a static bot.
- *
- * Anti-detection improvements (借鉴 OpenZen):
- * 1. Dual-axis jitter: triggers on both yaw AND pitch diff stagnation (not just yaw delta magnitude).
- * 2. groundTicks rotation smoothing: on the 1st ground tick, halve yaw step; on the 2nd, freeze yaw.
- *    This mimics the visual jolt of landing.
- * 3. Hard 90° per-tick yaw cap: prevents single-frame snaps >90° regardless of rotateStep.
- * 4. Random clamp noise: subtract a tiny random from the step each tick so the clamp limit is never
- *    the same value twice in a row.
- */
+import java.awt.Color;
+
 @Getter
 public class Scaffold extends Module {
-    public final ModeValue mode = new ModeValue("Mode", "Telly", "Telly", "Normal");
-    public final BoolValue sneak = new BoolValue("Eagle Sneak", true, () -> mode.is("Normal"));
-    public final BoolValue keepRotation = new BoolValue("Keep Rotation", true);
-    public final NumberValue rotateStep = new NumberValue("Rotate Step", 75, 20, 180, 5);
-    public final BoolValue jitter = new BoolValue("Anti-Stuck Jitter", true);
 
-    // Placement target resolved each tick.
-    private BlockPos targetSupport;
+    public final ModeValue   mode            = new ModeValue("Mode", "Normal", "Normal", "Telly Bridge", "Old Telly", "Keep Y");
+    public final BoolValue   eagle           = new BoolValue("Eagle",           true, () -> mode.is("Normal"));
+    public final BoolValue   sneak           = new BoolValue("Sneak",           true);
+    public final BoolValue   snap            = new BoolValue("Snap",            true, () -> mode.is("Normal"));
+    public final BoolValue   renderItemSpoof = new BoolValue("Render Item Spoof", true);
+    public final NumberValue rotationTick    = new NumberValue("Rotation Tick", 3, 1, 6, 1);
+    public final BoolValue   clutch          = new BoolValue("Clutch",          true);
+
+    public Rotation correctRotation = new Rotation();
+    public Rotation rots            = new Rotation();
+    public Rotation lastRots        = new Rotation();
+
+    private int     oldSlot;
+    private int     groundTicks, airTicks;
+    private int     eagleTimer;
+    private boolean canBuildNow = true;
+    private int     velocityDelay;
+    private int     rotationDelay;
+    private int     targetYLevel = -1;
+
+    private BlockPos  targetSupport;
     private Direction targetFace;
-    private BlockPos targetGap;
+    private boolean   haveTarget;
 
-    // Rotation state (degrees).
-    private float wantYaw, wantPitch;
-    private boolean haveTarget;
-    private float lastSentYaw = Float.NaN;
-    private float lastSentPitch = Float.NaN;
-
-    // Jitter: track per-axis diff across ticks (mirrors OpenZen's yawDiff/pitchDiff pattern).
-    private double lastYawDiff = Double.NaN;
+    private double lastYawDiff   = Double.NaN;
     private double lastPitchDiff = Double.NaN;
-    private int jitterCounter;
-
-    private boolean jitterFlip;
-
-    private int airTicks, groundTicks;
+    private int    jitterCounter;
 
     public Scaffold() {
         super("Scaffold", Category.Movement);
-        setDescription("Auto-bridge below your feet. Telly mode hops while bridging.");
+    }
+
+    // =========================================================================
+    // Enable / Disable
+    // =========================================================================
+
+    @Override
+    public void onEnable() {
+        if (mc.player == null) return;
+        oldSlot = mc.player.getInventory().selectedSlot;
+        rots.setYawPitch(mc.player.getYaw(), mc.player.getPitch());
+        lastRots.setYawPitch(mc.player.getYaw(), mc.player.getPitch());
+        targetYLevel  = 10000;
+        velocityDelay = 0;
+        rotationDelay = 0;
+        jitterCounter = 0;
+        lastYawDiff   = Double.NaN;
+        lastPitchDiff = Double.NaN;
+        canBuildNow   = true;
+        Client.delayPackets.clear();
     }
 
     @Override
     public void onDisable() {
-        if (mc.options != null) {
-            mc.options.jumpKey.setPressed(mc.options.jumpKey.isPressed());
-            mc.options.sneakKey.setPressed(false);
+        Runnable r;
+        while ((r = Client.delayPackets.poll()) != null) {
+            try { r.run(); } catch (Throwable ignored) {}
         }
-        resetState();
+        Client.delayPackets.clear();
+        if (mc.options != null) {
+            mc.options.sneakKey.setPressed(false);
+            mc.options.useKey.setPressed(false);
+        }
+        if (mc.player != null)
+            mc.player.getInventory().selectedSlot = oldSlot;
+        haveTarget  = false;
+        canBuildNow = true;
     }
 
-    private void resetState() {
-        targetSupport = null;
-        targetFace = null;
-        targetGap = null;
-        haveTarget = false;
-        lastSentYaw = lastSentPitch = Float.NaN;
-        lastYawDiff = lastPitchDiff = Double.NaN;
-        jitterCounter = 0;
-        airTicks = groundTicks = 0;
+    // =========================================================================
+    // Events
+    // =========================================================================
+
+    @EventTarget
+    public void onUpdateHeldItem(UpdateHeldItemEvent event) {
+        if (renderItemSpoof.getValue() && event.getHand() == Hand.MAIN_HAND && mc.player != null)
+            event.setItemStack(mc.player.getInventory().getStack(oldSlot));
+    }
+
+    /** Mirror of OpenZen onMotion: only increment counters here. */
+    @EventTarget
+    public void onMotion(MotionEvent event) {
+        if (mc.player == null || !event.isPost()) return;
+        if (mc.player.isOnGround()) { groundTicks++; airTicks = 0; }
+        else                        { groundTicks = 0; airTicks++; }
     }
 
     @EventTarget
-    public void onMotion(MotionEvent event) {
+    public void onPacket(PacketEvent event) {
+        if (mc.player == null || event.getType() != PacketEvent.Type.Received) return;
+        if (event.getPacket() instanceof net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket vel
+                && vel.getEntityId() == mc.player.getId()) {
+            double len = Math.hypot(vel.getVelocityX(), vel.getVelocityZ()) / 8000.0;
+            if (len >= 1.5) velocityDelay = 60;
+        }
+    }
+
+    @EventTarget
+    public void onJump(JumpEvent event) {
+        if (!canBuildNow && haveTarget && rotationDelay > 0) event.setCancelled(true);
+    }
+
+    // =========================================================================
+    // Main tick  (mirrors OpenZen onTick priority=1)
+    // =========================================================================
+
+    @EventTarget
+    @EventPriority(1)
+    public void onTick(TickEvent event) {
         if (mc.player == null || mc.world == null) return;
 
-        if (event.isPost()) {
-            if (mc.player.isOnGround()) { groundTicks++; airTicks = 0; }
-            else                        { airTicks++; groundTicks = 0; }
+        // --- velocity delay ---
+        if (velocityDelay > 0) velocityDelay--;
+        if (mc.player.isOnGround() && velocityDelay <= 30) velocityDelay = 0;
+
+        // --- slot ---
+        int slot = BlockUtil.findBlockSlot();
+        if (slot != -1 && mc.player.getInventory().selectedSlot != slot)
+            mc.player.getInventory().selectedSlot = slot;
+
+        boolean jumpHeld = mc.options.jumpKey.isPressed();
+
+        // --- targetYLevel ---
+        if (targetYLevel == -1
+                || targetYLevel > (int) Math.floor(mc.player.getY()) - 1
+                || mc.player.isOnGround()
+                || !MovementUtil.isMoving()
+                || jumpHeld
+                || mode.is("Normal")) {
+            targetYLevel = (int) Math.floor(mc.player.getY()) - 1;
+        }
+
+        // --- target resolution (OpenZen applyRotations) ---
+        resolveTarget();
+
+        // --- clutch ---
+        boolean firstGroundTick = false;
+        canBuildNow = true;
+        if (haveTarget && slot != -1) {
+            if (groundTicks == 1 && jumpHeld) firstGroundTick = true;
+            if (clutch.getValue() && mc.player.getVelocity().y < -0.1) {
+                MotionSimulator sim = new MotionSimulator(mc.player);
+                sim.simulateWithFriction(2);
+                if (targetSupport != null && targetSupport.getY() > sim.y) canBuildNow = false;
+            }
+        }
+        if (mc.player.isOnGround()) canBuildNow = true;
+
+        // --- reference rotation ---
+        float refYaw   = RotationManager.prevRotation != null ? RotationManager.prevRotation.getYaw()   : mc.player.getYaw();
+        float refPitch = RotationManager.prevRotation != null ? RotationManager.prevRotation.getPitch() : mc.player.getPitch();
+
+        // --- correctRotation ---
+        correctRotation = (mode.is("Telly Bridge") && canBuildNow)
+                ? getTargetRotation(firstGroundTick, refYaw, refPitch)
+                : getPlayerYawRotation();
+        if (correctRotation == null) correctRotation = getPlayerYawRotation();
+
+        if (!haveTarget) {
+            Client.delayPackets.clear();
+            lastRots.setYawPitch(rots.getYaw(), rots.getPitch());
             return;
         }
 
-        int slot = BlockUtil.findBlockSlot();
-        if (slot == -1) { haveTarget = false; return; }
-        if (mc.player.getInventory().selectedSlot != slot)
-            mc.player.getInventory().selectedSlot = slot;
+        // --- clutch delayPackets path (OpenZen) ---
+        if (clutch.getValue() && (!canBuildNow || velocityDelay > 0) && rotationDelay <= 8) {
+            Rotation toBlock       = RotationUtil.rotationToBlock(targetSupport, 1.0f);
+            Rotation previousTarget = RotationManager.targetRotation;
+            rots.setYawPitch(toBlock.getYaw(), toBlock.getPitch());
+            RotationManager.targetRotation = rots;
+            rotationDelay++;
 
-        resolveTarget();
-        if (!haveTarget) return;
-
-        computeRotation();
-
-        event.setYaw(wantYaw);
-        event.setPitch(wantPitch);
-        if (!keepRotation.getValue()) {
-            mc.player.setYaw(wantYaw);
-            mc.player.setPitch(wantPitch);
+            final boolean onGround           = mc.player.isOnGround();
+            final boolean horizontalCollision = mc.player.horizontalCollision;
+            Client.delayPackets.add(() -> {});
+            Client.delayPackets.add(() -> {
+                if (mc.player == null) return;
+                if (RotationManager.prevSentRotation == null) RotationManager.prevSentRotation = new Rotation();
+                RotationManager.prevSentRotation.setYawPitch(toBlock.getYaw(), toBlock.getPitch());
+                boolean shouldSend = previousTarget == null || previousTarget.getYaw() != toBlock.getYaw();
+                if (shouldSend)
+                    PacketUtil.sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
+                            toBlock.getYaw(), toBlock.getPitch(), onGround, horizontalCollision));
+                doSnap();
+                onTick(event);
+            });
+            return;
         }
 
-        place();
+        // --- normal path ---
+        canBuildNow = true;
+        Client.delayPackets.clear();
+        rotationDelay = 0;
+
+        if (mode.is("Normal") && snap.getValue()) {
+            rots.setYaw(correctRotation.getYaw());
+        } else {
+            rots.setYaw(RotationUtil.moveTowards((float) getBlockDistance(), rots.getYaw(), correctRotation.getYaw()));
+        }
+        rots.setPitch(correctRotation.getPitch());
+
+        // sneak timer
+        if (sneak.getValue()) {
+            eagleTimer++;
+            if (eagleTimer == 18) {
+                if (mc.player.isSprinting()) { mc.options.sprintKey.setPressed(false); mc.player.setSprinting(false); }
+                mc.options.sneakKey.setPressed(true);
+            } else if (eagleTimer >= 21) {
+                mc.options.sneakKey.setPressed(false);
+                eagleTimer = 0;
+            }
+        }
+
+        // --- mode-specific ---
+        if (mode.is("Telly Bridge") || mode.is("Old Telly")) {
+            // OpenZen: on the ground while moving → skip placement this tick
+            if (airTicks < 1 && MovementUtil.isMoving()) {
+                if (mode.is("Old Telly")) rots.setYaw(mc.player.getYaw());
+                lastRots.setYawPitch(rots.getYaw(), rots.getPitch());
+                return;
+            }
+            // In the air: place immediately using the rotation we just set
+            tryPlace();
+        } else if (mode.is("Keep Y")) {
+            mc.options.jumpKey.setPressed(MovementUtil.isMoving() || jumpHeld);
+            tryPlace();
+        } else {
+            // Normal
+            if (eagle.getValue())
+                mc.options.sneakKey.setPressed(mc.player.isOnGround() && isOnBlockEdge(0.3f));
+            if (snap.getValue() && !jumpHeld) resetSnap();
+            tryPlace();
+        }
+
+        lastRots.setYawPitch(rots.getYaw(), rots.getPitch());
     }
 
     @EventTarget
-    public void onMoveInput(MoveInputEvent event) {
-        if (mc.player == null) return;
+    public void onUpdate(UpdateEvent event) { setSuffix(mode.getValue()); }
 
-        if (mode.is("Telly")) {
-            if (MovementUtil.isMoving() || event.isJumping())
-                event.setJumping(true);
-        } else if (sneak.getValue()) {
-            event.setSneaking(event.isSneaking() || (mc.player.isOnGround() && isOnEdge()));
-        }
+    // =========================================================================
+    // Placement
+    // =========================================================================
+
+    /**
+     * tryPlace — mirrors OpenZen onPreMotion gate logic.
+     * Called AFTER rots has been fully set for this tick.
+     */
+    private void tryPlace() {
+        if (mc.currentScreen != null || !haveTarget) return;
+        boolean canRayTrace = RayTraceUtil.canRayTrace(rots, targetFace, targetSupport, false);
+        if (!canBuildNow && !isPlacementReachable()) return;
+        if (rotationDelay <= 0 && !mode.is("Old Telly") && !canRayTrace) return;
+        doSnap();
     }
 
-    @EventTarget
-    public void onUpdate(UpdateEvent event) {
-        setSuffix(mode.getValue());
+    private void doSnap() {
+        if (!haveTarget || mc.player == null || mc.interactionManager == null) return;
+        if (!BlockUtil.isPlaceable(mc.player.getMainHandStack())) return;
+        if (targetFace == null) return;
+        // OpenZen: skip UP-face placement in air while moving (except Normal)
+        if (targetFace == Direction.UP && !mc.player.isOnGround()
+                && MovementUtil.isMoving() && !mc.options.jumpKey.isPressed()
+                && !mode.is("Normal")) return;
+
+        BlockHitResult hit = new BlockHitResult(
+                getHitVec(targetSupport, targetFace), targetFace, targetSupport, false);
+        if (mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hit).isAccepted())
+            mc.player.swingHand(Hand.MAIN_HAND);
     }
 
-    // --- target resolution ---------------------------------------------------
+    // =========================================================================
+    // Target resolution  (OpenZen applyRotations / isAbovePlaceable)
+    // =========================================================================
 
     private void resolveTarget() {
         haveTarget = false;
-        Vec3d base = mc.player.getPos();
+        Vec3d eye = mc.player.getEyePos();
 
-        BlockPos feet = BlockPos.ofFloored(base.x, base.y - 0.5, base.z);
-        if (tryGap(feet)) return;
+        if (!canBuildNow)
+            eye = eye.add(mc.player.getVelocity().multiply(2));
+        if (clutch.getValue() && mc.player.getVelocity().y < 0.01) {
+            MotionSimulator sim = new MotionSimulator(mc.player);
+            sim.simulateWithFriction(2);
+            double simEyeY = sim.y + mc.player.getEyeHeight(mc.player.getPose());
+            eye = new Vec3d(eye.x, Math.max(simEyeY, eye.y), eye.z);
+        }
 
-        if (MovementUtil.isMoving()) {
-            double dir = MovementUtil.getDirection();
-            BlockPos behind = BlockPos.ofFloored(
-                    base.x - MathHelper.sin((float) dir) * 0.6,
-                    base.y - 0.5,
-                    base.z + MathHelper.cos((float) dir) * 0.6);
-            tryGap(behind);
+        BlockPos feet = BlockPos.ofFloored(eye.x, targetYLevel + 0.1, eye.z);
+        int fx = feet.getX(), fz = feet.getZ();
+
+        if (mc.world.getBlockState(feet).hasSolidTopSurface(mc.world, feet, mc.player)) return;
+
+        if (isAbovePlaceable(eye, feet)) return;
+        for (int r = 1; r <= 6; r++) {
+            if (isAbovePlaceable(eye, new BlockPos(fx, targetYLevel - r, fz))) return;
+            for (int x = 1; x <= r; x++) {
+                for (int z = 0; z <= r - x; z++) {
+                    int yOff = r - x - z;
+                    for (int sx = 0; sx <= 1; sx++) for (int sz = 0; sz <= 1; sz++) {
+                        if (isAbovePlaceable(eye, new BlockPos(
+                                fx + (sx == 0 ? x : -x),
+                                targetYLevel - yOff,
+                                fz + (sz == 0 ? z : -z)))) return;
+                    }
+                }
+            }
         }
     }
 
-    private boolean tryGap(BlockPos gap) {
-        if (!BlockUtil.isReplaceable(gap)) return false;
+    private boolean isAbovePlaceable(Vec3d eye, BlockPos pos) {
+        if (mc.world == null || mc.player == null) return false;
+        if (!mc.world.getBlockState(pos).isAir()) return false;
+        Vec3d center = new Vec3d(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
         for (Direction dir : Direction.values()) {
-            BlockPos support = gap.offset(dir);
-            if (BlockUtil.isSolid(support)) {
-                this.targetGap = gap;
-                this.targetSupport = support;
-                this.targetFace = dir.getOpposite();
-                this.haveTarget = true;
-                return true;
+            Vec3d offsetCenter = center.add(Vec3d.of(dir.getVector()).multiply(0.5));
+            BlockPos offset = pos.offset(dir);
+            if (mc.world.getBlockState(offset).isSolidSurface(mc.world, offset, mc.player, dir)) {
+                Vec3d delta = offsetCenter.subtract(eye);
+                if (delta.lengthSquared() <= 20.25
+                        && delta.normalize().dotProduct(Vec3d.of(dir.getVector()).normalize()) >= 0.0) {
+                    targetSupport = offset;
+                    targetFace    = dir.getOpposite();
+                    haveTarget    = true;
+                    return true;
+                }
             }
         }
         return false;
     }
 
-    // --- rotation ------------------------------------------------------------
+    private boolean isPlacementReachable() {
+        if (!haveTarget || mc.player == null) return false;
+        Vec3d hitPoint = new Vec3d(targetSupport.getX() + 0.5, targetSupport.getY() + 0.5, targetSupport.getZ() + 0.5)
+                .add(Vec3d.of(targetFace.getVector()).multiply(0.5));
+        Vec3d toBlock = hitPoint.subtract(mc.player.getEyePos());
+        return toBlock.lengthSquared() <= 20.25
+                && toBlock.normalize().dotProduct(Vec3d.of(targetFace.getVector()).multiply(-1).normalize()) >= 0.0;
+    }
 
-    private void computeRotation() {
-        Vec3d hit = hitVec(targetSupport, targetFace);
-        float[] raw = rotationsTo(hit);
-        float targetYaw   = raw[0];
-        float targetPitch = MathHelper.clamp(raw[1], -90f, 90f);
+    // =========================================================================
+    // Rotation  (OpenZen getTargetRotation → findValidRotation → getSnappedRotation)
+    // =========================================================================
 
-        float refYaw   = Float.isNaN(lastSentYaw)   ? mc.player.getYaw()   : lastSentYaw;
-        float refPitch = Float.isNaN(lastSentPitch)  ? mc.player.getPitch() : lastSentPitch;
+    private Rotation getTargetRotation(boolean firstGround, float refYaw, float refPitch) {
+        if (!MovementUtil.isMoving()) return getPlayerYawRotation();
+        if (!haveTarget) return new Rotation(mc.player.getYaw(), mc.player.getPitch());
 
-        // --- [1] per-tick clamp with tiny random noise (OpenZen: clampLimit -= random(0.001,0.006)) ---
-        float step = rotateStep.getValue();
-        if (airTicks >= 1) step = Math.max(step, 90f);
-        step -= (float)(Math.random() * 0.005 + 0.001); // noise so clamp is never identical
+        Vec3d    hitVec   = getHitVec(targetSupport, targetFace);
+        Rotation rot      = RotationUtil.rotationFromVec(hitVec);
+        double   yawDelta = RotationUtil.angleDiffDouble(rot.getYaw(), refYaw);
 
-        // --- [2] Hard 90° cap (OpenZen: getOptimalRotation) ---
-        step = Math.min(step, 90f);
-
-        float delta = MathHelper.wrapDegrees(targetYaw - refYaw);
-
-        // --- [3] groundTicks landing smoothing (OpenZen: case 1 → half step, case 2 → freeze) ---
-        if (groundTicks == 1) {
-            delta *= 0.5f;          // 1st ground tick: halve yaw travel, simulate landing jolt
-            targetPitch = 75.5f;
-        } else if (groundTicks == 2) {
-            delta = 0f;             // 2nd ground tick: don't rotate at all
-            targetPitch = 75.5f;
-        }
-
-        delta = MathHelper.clamp(delta, -step, step);
-        float yaw = refYaw + delta;
-
-        // --- [4] Dual-axis jitter (OpenZen: stuckYaw || stuckPitch) ---
-        if (jitter.getValue()) {
-            double yawDiff   = Math.abs(MathHelper.wrapDegrees(yaw - refYaw));
-            double pitchDiff = Math.abs(targetPitch - refPitch);
-
-            boolean stuckYaw   = yawDiff   > 2.0 && !Double.isNaN(lastYawDiff)
-                               && Math.abs(yawDiff   - lastYawDiff)   < 1e-4;
-            boolean stuckPitch = pitchDiff > 2.0 && !Double.isNaN(lastPitchDiff)
-                               && Math.abs(pitchDiff - lastPitchDiff) < 1e-4;
-
-            if (stuckYaw || stuckPitch) {
-                float jitterYaw   = 0.095f + (float) Math.random() * 0.095f;  // 0.095–0.19
-                float jitterPitch = 0.016f + (float) Math.random() * 0.039f;  // 0.016–0.055
-                if ((jitterCounter++ & 1) == 0) jitterYaw = -jitterYaw;
-                yaw          += jitterYaw;
-                targetPitch   = MathHelper.clamp(targetPitch + jitterPitch, -89.5f, 89.5f);
-                yawDiff   = Math.abs(MathHelper.wrapDegrees(yaw - refYaw));
-                pitchDiff = Math.abs(targetPitch - refPitch);
+        if (groundTicks > 0) {
+            if (!mc.options.jumpKey.isPressed())
+                return new Rotation(mc.player.getYaw(), 75.5f);
+            if (groundTicks == 1) {
+                if (!firstGround) {
+                    rot.setYaw(refYaw + RotationUtil.clampAngle((float) yawDelta, (float)(yawDelta / 2.0)));
+                    rot.setPitch(75.5f);
+                } else {
+                    rot = RotationUtil.rotationFromVec(hitVec);
+                }
+                ReflectionUtil.setJumpDelay(2);
+            } else if (groundTicks == 2) {
+                return new Rotation(mc.player.getYaw(), 75.5f);
             }
-
-            lastYawDiff   = yawDiff;
-            lastPitchDiff = pitchDiff;
-        }
-
-        this.wantYaw     = yaw;
-        this.wantPitch   = targetPitch;
-        this.lastSentYaw = yaw;
-        this.lastSentPitch = targetPitch;
-    }
-
-    private float[] rotationsTo(Vec3d target) {
-        Vec3d eye  = mc.player.getEyePos();
-        double dx  = target.x - eye.x;
-        double dy  = target.y - eye.y;
-        double dz  = target.z - eye.z;
-        double dist = Math.sqrt(dx * dx + dz * dz);
-        float yaw   = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90f;
-        float pitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
-        return new float[]{yaw, pitch};
-    }
-
-    private Vec3d hitVec(BlockPos support, Direction face) {
-        double x = support.getX() + 0.5;
-        double y = support.getY() + 0.5;
-        double z = support.getZ() + 0.5;
-        double r = 0.3;
-        if (face.getAxis() == Direction.Axis.Y) {
-            x += rand(r); z += rand(r);
         } else {
-            y += rand(r);
-            if (face.getAxis() == Direction.Axis.X) z += rand(r); else x += rand(r);
+            float clampLimit = airTicks == 1 ? 90.0f : 50.0f;
+            clampLimit -= MathUtil.getRandomInRange(0.001f, 0.006f);
+            rot.setYaw(refYaw + RotationUtil.clampAngle((float) yawDelta, clampLimit));
         }
-        Vec3d n = Vec3d.of(face.getVector());
-        return new Vec3d(x, y, z).add(n.multiply(0.5));
+
+        rot = findValidRotation(rot, firstGround, refYaw, refPitch);
+        return getSnappedRotation(rot, refYaw, refPitch);
     }
 
-    private double rand(double range) {
-        return (Math.random() * 2 - 1) * range;
+    private Rotation findValidRotation(Rotation rot, boolean firstGround, float refYaw, float refPitch) {
+        if (firstGround) return rot;
+        double delta = MathHelper.wrapDegrees(rot.getYaw() - refYaw);
+        if (Math.abs(delta) > 90.0)
+            rot.setYaw((float)(refYaw + Math.copySign(90.0, delta)));
+        double maxStep = Math.max(45.0, 180.0 / Math.max(1.0, rotationTick.getValue().doubleValue()));
+        if (mode.is("Telly Bridge")) maxStep = Math.max(maxStep, 75.0);
+        return RotationUtil.smoothRotation(new Rotation(refYaw, refPitch), rot, maxStep);
     }
 
-    // --- placement -----------------------------------------------------------
-
-    private void place() {
-        if (mc.interactionManager == null || mc.player == null) return;
-        if (!BlockUtil.isPlaceable(mc.player.getMainHandStack())) return;
-        if (!BlockUtil.isReplaceable(targetGap)) return;
-
-        BlockHitResult hit = new BlockHitResult(
-                hitVec(targetSupport, targetFace), targetFace, targetSupport, false);
-
-        if (mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hit).isAccepted()) {
-            mc.player.swingHand(Hand.MAIN_HAND);
+    private Rotation getSnappedRotation(Rotation rot, float refYaw, float refPitch) {
+        double yd = Math.abs(MathHelper.wrapDegrees(rot.getYaw() - refYaw));
+        double pd = Math.abs(rot.getPitch() - refPitch);
+        boolean stuckY = yd > 2.0 && !Double.isNaN(lastYawDiff)   && Math.abs(yd - lastYawDiff)   < 1e-4;
+        boolean stuckP = pd > 2.0 && !Double.isNaN(lastPitchDiff) && Math.abs(pd - lastPitchDiff) < 1e-4;
+        if (stuckY || stuckP) {
+            float jy = MathUtil.getRandomInRange(0.095f, 0.19f);
+            float jp = MathUtil.getRandomInRange(0.016f, 0.055f);
+            if ((jitterCounter++ & 1) == 0) jy = -jy;
+            rot = rot.clone();
+            rot.setYaw(rot.getYaw() + jy);
+            rot.setPitch(MathHelper.clamp(rot.getPitch() + jp, -89.5f, 89.5f));
+            yd = Math.abs(MathHelper.wrapDegrees(rot.getYaw() - refYaw));
+            pd = Math.abs(rot.getPitch() - refPitch);
         }
+        lastYawDiff   = yd;
+        lastPitchDiff = pd;
+        return rot;
     }
 
-    private boolean isOnEdge() {
+    private Rotation getPlayerYawRotation() {
+        if (!haveTarget || mc.player == null) return new Rotation(mc.player != null ? mc.player.getYaw() : 0, 0);
+        return RotationUtil.rotationToBlock(targetSupport, 0.0f);
+    }
+
+    private double getBlockDistance() {
+        if (mode.is("Old Telly")) return 180.0;
+        double base = Math.max(60.0, 360.0 / rotationTick.getValue().doubleValue());
+        return Math.max(base, 180.0);
+    }
+
+    // =========================================================================
+    // Render
+    // =========================================================================
+
+    @EventTarget
+    public void onRender3D(Render3DEvent event) {
+        if (!haveTarget || mc.player == null || mc.gameRenderer == null) return;
+        MatrixStack matrices = event.getMatrices();
+        Vec3d cam = mc.gameRenderer.getCamera().getPos();
+        Box box = new Box(targetSupport.offset(targetFace));
+        matrices.push();
+        matrices.translate(-cam.x, -cam.y, -cam.z);
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.disableDepthTest();
+        RenderSystem.depthMask(false);
+        RenderSystem.disableCull();
+        Color c = new Color(74, 144, 226);
+        RenderSystem.setShaderColor(c.getRed() / 255f, c.getGreen() / 255f, c.getBlue() / 255f, 0.25f);
+        RenderUtil.drawSolidBox(box, matrices);
+        RenderSystem.setShaderColor(c.getRed() / 255f, c.getGreen() / 255f, c.getBlue() / 255f, 0.75f);
+        RenderUtil.drawOutlineBox(box, matrices);
+        RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
+        RenderSystem.enableCull();
+        RenderSystem.disableBlend();
+        RenderSystem.enableDepthTest();
+        RenderSystem.depthMask(true);
+        matrices.pop();
+    }
+
+    @EventTarget
+    public void onRender2D(Render2DEvent event) {
+        if (mc.player == null || mc.world == null) return;
+        int total = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = mc.player.getInventory().getStack(i);
+            if (s.getItem() instanceof BlockItem && BlockUtil.isPlaceable(s)) total += s.getCount();
+        }
+        if (total == 0) return;
+        String count = String.valueOf(total);
+        String suffix = " Blocks";
+        DrawContext ctx = event.getContext();
+        int cx = mc.getWindow().getScaledWidth() / 2;
+        int y  = mc.getWindow().getScaledHeight() / 2 - 20;
+        int tw = mc.textRenderer.getWidth(count + suffix);
+        int x  = cx - tw / 2;
+        ctx.drawText(mc.textRenderer, count,  x, y, 0xF4555562, false);
+        ctx.drawText(mc.textRenderer, suffix, x + mc.textRenderer.getWidth(count), y, 0xFFFFFFFF, false);
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    private void resetSnap() {
+        if (!haveTarget) return;
+        HitResult r = RayTraceUtil.rayTrace(1.0f, rots);
+        boolean looking = r instanceof BlockHitResult bhr
+                && bhr.getBlockPos().equals(targetSupport)
+                && bhr.getSide() != Direction.UP;
+        if (!looking && mc.player.age % 4 == 0)
+            rots.setYaw(mc.player.getYaw() + MathUtil.getRandomInRange(-0.25f, 0.25f));
+    }
+
+    public static Vec3d getHitVec(BlockPos pos, Direction d) {
+        double x = pos.getX() + 0.5, y = pos.getY() + 0.5, z = pos.getZ() + 0.5;
+        if (d != Direction.UP && d != Direction.DOWN) y += rand(0.3); else { x += rand(0.3); z += rand(0.3); }
+        if (d == Direction.WEST  || d == Direction.EAST)  z += rand(0.3);
+        if (d == Direction.SOUTH || d == Direction.NORTH) x += rand(0.3);
+        return new Vec3d(x, y, z);
+    }
+
+    private static double rand(double r) { return (Math.random() * 2 - 1) * r; }
+
+    public static boolean isOnBlockEdge(float inflate) {
         if (mc.world == null || mc.player == null) return false;
         return !mc.world.getBlockCollisions(mc.player,
-                mc.player.getBoundingBox().offset(0, -0.5, 0).contract(0.3, 0, 0.3))
+                mc.player.getBoundingBox().offset(0, -0.5, 0).contract(inflate, 0, inflate))
                 .iterator().hasNext();
     }
 }

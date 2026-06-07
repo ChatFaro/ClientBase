@@ -7,6 +7,7 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.*;
 import net.minecraft.world.RaycastContext;
+import net.minecraft.entity.EntityPose;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -176,5 +177,111 @@ public class RotationUtil implements IMinecraft {
         float yaw = previousRotation[0] + (float) (Math.round((rotation[0] - previousRotation[0]) / multiplier) * multiplier);
         float pitch = previousRotation[1] + (float) (Math.round((rotation[1] - previousRotation[1]) / multiplier) * multiplier);
         return new float[]{yaw, MathHelper.clamp(pitch, -90.0F, 90.0F)};
+    }
+
+    // -----------------------------------------------------------------------
+    // Methods ported VERBATIM from OpenZen RotationUtil (Scaffold rotation math)
+    // -----------------------------------------------------------------------
+
+    /** OpenZen addNoise: value + rand(0.05,0.08) * (rand(0,1)*2 - 1). */
+    private double addNoise(double value) {
+        double a = Math.random() * (0.08 - 0.05) + 0.05;
+        return value + a * (Math.random() * 2.0 - 1.0);
+    }
+
+    /** OpenZen rotationFromDeltas: yaw/pitch from world deltas, wrapped. */
+    public Rotation rotationFromDeltas(double dx, double dy, double dz) {
+        double horizontalDist = Math.sqrt(dx * dx + dz * dz);
+        float yaw   = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0f;
+        float pitch = (float) (-Math.toDegrees(Math.atan2(dy, horizontalDist)));
+        return new Rotation(MathHelper.wrapDegrees(yaw), MathHelper.wrapDegrees(pitch));
+    }
+
+    /** OpenZen rotationFromVec: from player eye to a world Vec3d, with noise + wrap. */
+    public Rotation rotationFromVec(Vec3d target) {
+        if (mc.player == null) return new Rotation(0, 0);
+        return rotationFromCoords(target.x, target.y, target.z);
+    }
+
+    public Rotation rotationFromCoords(double x, double y, double z) {
+        if (mc.player == null) return new Rotation(0, 0);
+        double fromX = mc.player.getX();
+        double fromY = mc.player.getY() + mc.player.getEyeHeight(mc.player.getPose());
+        double fromZ = mc.player.getZ();
+        double dx = addNoise(x - fromX);
+        double dy = addNoise(y - fromY);
+        double dz = addNoise(z - fromZ);
+        double horizontalDist = Math.sqrt(dx * dx + dz * dz);
+        float yaw   = (float) (Math.atan2(dz, dx) * 180.0 / Math.PI) - 90.0f;
+        float pitch = (float) (-(Math.atan2(dy, horizontalDist) * 180.0 / Math.PI));
+        return new Rotation(yaw, pitch);
+    }
+
+    /** OpenZen rotationToBlock: eye→block centre with partialTicks motion prediction + noise. */
+    public Rotation rotationToBlock(BlockPos blockPos, float partialTicks) {
+        if (mc.player == null) return new Rotation(0, 0);
+        double px = mc.player.getX() + mc.player.getVelocity().x * partialTicks;
+        double py = mc.player.getY() + mc.player.getEyeHeight(mc.player.getPose()) + mc.player.getVelocity().y * partialTicks;
+        double pz = mc.player.getZ() + mc.player.getVelocity().z * partialTicks;
+        double dx = (double) blockPos.getX() - px + 0.5;
+        double dy = (double) blockPos.getY() - py + 0.5;
+        double dz = (double) blockPos.getZ() - pz + 0.5;
+        return rotationFromDeltas(addNoise(dx), addNoise(dy), addNoise(dz));
+    }
+
+    /**
+     * Smooth rotation from {@code current} toward {@code target} with a per-tick step budget.
+     * Faithful port of OpenZen RotationUtil.smoothRotation.
+     */
+    public Rotation smoothRotation(Rotation current, Rotation target, double speed) {
+        float targetYaw   = target.getYaw();
+        float targetPitch = target.getPitch();
+        float currYaw     = current.getYaw();
+        float currPitch   = current.getPitch();
+        if (speed != 0.0) {
+            float maxStep = (float) speed;
+            double yawDiff   = MathHelper.wrapDegrees(target.getYaw() - current.getYaw());
+            double pitchDiff = targetPitch - currPitch;
+            double dist = Math.sqrt(yawDiff * yawDiff + pitchDiff * pitchDiff);
+            if (dist > 0) {
+                double yawRatio   = Math.abs(yawDiff   / dist);
+                double pitchRatio = Math.abs(pitchDiff / dist);
+                double maxYawStep   = (double) maxStep * yawRatio;
+                double maxPitchStep = (double) maxStep * pitchRatio;
+                float yawStep   = (float) Math.max(Math.min(yawDiff,   maxYawStep),   -maxYawStep);
+                float pitchStep = (float) Math.max(Math.min(pitchDiff, maxPitchStep), -maxPitchStep);
+                targetYaw   = currYaw   + yawStep;
+                targetPitch = currPitch + pitchStep;
+            }
+        }
+        // GCD / sensitivity snap (OpenZen uses snapToSensitivity loop; reuse our patch)
+        float[] snapped = applySensitivityPatch(new float[]{targetYaw, targetPitch});
+        if (snapped != null) {
+            targetYaw   = snapped[0];
+            targetPitch = MathHelper.clamp(snapped[1], -90f, 90f);
+        }
+        return new Rotation(targetYaw, targetPitch);
+    }
+
+    /** Clamp {@code angle} to ±{@code max} (OpenZen clampAngle). */
+    public float clampAngle(float angle, float max) {
+        if (Math.abs(angle) < max) return angle;
+        if (angle > 0.0f) return max;
+        if (angle < 0.0f) return -max;
+        return 0.0f;
+    }
+
+    /** Signed angular difference (degrees) from b to a, normalised to (−180, 180] (OpenZen angleDiffDouble). */
+    public double angleDiffDouble(float a, float b) {
+        double diff = a - b;
+        return ((diff + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+    }
+
+    /** Move {@code current} toward {@code target} by at most {@code maxStep} degrees (OpenZen moveTowards/rotateTowards). */
+    public float moveTowards(float maxStep, float current, float target) {
+        float diff = MathHelper.wrapDegrees(target - current);
+        if (diff > maxStep)  diff = maxStep;
+        if (diff < -maxStep) diff = -maxStep;
+        return current + diff;
     }
 }

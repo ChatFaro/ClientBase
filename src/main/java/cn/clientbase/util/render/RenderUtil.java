@@ -1,11 +1,19 @@
 package cn.clientbase.util.render;
 
 import cn.clientbase.util.IMinecraft;
+import com.mojang.blaze3d.systems.RenderSystem;
 import lombok.experimental.UtilityClass;
+import net.minecraft.client.gl.ShaderProgramKeys;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.render.BufferBuilder;
+import net.minecraft.client.render.BufferRenderer;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.RenderLayer;
+import net.minecraft.client.render.Tessellator;
 import net.minecraft.client.render.VertexConsumer;
+import net.minecraft.client.render.VertexFormat;
+import net.minecraft.client.render.VertexFormats;
+import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
@@ -81,5 +89,76 @@ public final class RenderUtil implements IMinecraft {
         });
 
         context.getMatrices().pop();
+    }
+
+    // -----------------------------------------------------------------------
+    // 3D world-space box rendering (ported from OpenZen RenderUtil) — used by
+    // Scaffold's placement preview. Caller is responsible for translating the
+    // MatrixStack to camera-relative space before calling.
+    // -----------------------------------------------------------------------
+
+    /** Filled box (QUADS). Color/blend set via RenderSystem.setShaderColor beforehand. */
+    public void drawSolidBox(Box box, MatrixStack matrices) {
+        Matrix4f matrix = matrices.peek().getPositionMatrix();
+        RenderSystem.setShader(ShaderProgramKeys.POSITION);
+        BufferBuilder buffer = Tessellator.getInstance().begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION);
+        float minX = (float) box.minX, minY = (float) box.minY, minZ = (float) box.minZ;
+        float maxX = (float) box.maxX, maxY = (float) box.maxY, maxZ = (float) box.maxZ;
+        // bottom
+        buffer.vertex(matrix, minX, minY, minZ);
+        buffer.vertex(matrix, maxX, minY, minZ);
+        buffer.vertex(matrix, maxX, minY, maxZ);
+        buffer.vertex(matrix, minX, minY, maxZ);
+        // top
+        buffer.vertex(matrix, minX, maxY, minZ);
+        buffer.vertex(matrix, minX, maxY, maxZ);
+        buffer.vertex(matrix, maxX, maxY, maxZ);
+        buffer.vertex(matrix, maxX, maxY, minZ);
+        // north
+        buffer.vertex(matrix, minX, minY, minZ);
+        buffer.vertex(matrix, minX, maxY, minZ);
+        buffer.vertex(matrix, maxX, maxY, minZ);
+        buffer.vertex(matrix, maxX, minY, minZ);
+        // east
+        buffer.vertex(matrix, maxX, minY, minZ);
+        buffer.vertex(matrix, maxX, maxY, minZ);
+        buffer.vertex(matrix, maxX, maxY, maxZ);
+        buffer.vertex(matrix, maxX, minY, maxZ);
+        // south
+        buffer.vertex(matrix, maxX, minY, maxZ);
+        buffer.vertex(matrix, maxX, maxY, maxZ);
+        buffer.vertex(matrix, minX, maxY, maxZ);
+        buffer.vertex(matrix, minX, minY, maxZ);
+        // west
+        buffer.vertex(matrix, minX, minY, maxZ);
+        buffer.vertex(matrix, minX, maxY, maxZ);
+        buffer.vertex(matrix, minX, maxY, minZ);
+        buffer.vertex(matrix, minX, minY, minZ);
+        BufferRenderer.drawWithGlobalProgram(buffer.end());
+    }
+
+    /** Outline box (DEBUG_LINES). Color/blend set via RenderSystem.setShaderColor beforehand. */
+    public void drawOutlineBox(Box box, MatrixStack matrices) {
+        Matrix4f matrix = matrices.peek().getPositionMatrix();
+        RenderSystem.setShader(ShaderProgramKeys.POSITION);
+        BufferBuilder buffer = Tessellator.getInstance().begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION);
+        float minX = (float) box.minX, minY = (float) box.minY, minZ = (float) box.minZ;
+        float maxX = (float) box.maxX, maxY = (float) box.maxY, maxZ = (float) box.maxZ;
+        // bottom rectangle
+        buffer.vertex(matrix, minX, minY, minZ); buffer.vertex(matrix, maxX, minY, minZ);
+        buffer.vertex(matrix, maxX, minY, minZ); buffer.vertex(matrix, maxX, minY, maxZ);
+        buffer.vertex(matrix, maxX, minY, maxZ); buffer.vertex(matrix, minX, minY, maxZ);
+        buffer.vertex(matrix, minX, minY, maxZ); buffer.vertex(matrix, minX, minY, minZ);
+        // verticals
+        buffer.vertex(matrix, minX, minY, minZ); buffer.vertex(matrix, minX, maxY, minZ);
+        buffer.vertex(matrix, maxX, minY, minZ); buffer.vertex(matrix, maxX, maxY, minZ);
+        buffer.vertex(matrix, maxX, minY, maxZ); buffer.vertex(matrix, maxX, maxY, maxZ);
+        buffer.vertex(matrix, minX, minY, maxZ); buffer.vertex(matrix, minX, maxY, maxZ);
+        // top rectangle
+        buffer.vertex(matrix, minX, maxY, minZ); buffer.vertex(matrix, maxX, maxY, minZ);
+        buffer.vertex(matrix, maxX, maxY, minZ); buffer.vertex(matrix, maxX, maxY, maxZ);
+        buffer.vertex(matrix, maxX, maxY, maxZ); buffer.vertex(matrix, minX, maxY, maxZ);
+        buffer.vertex(matrix, minX, maxY, maxZ); buffer.vertex(matrix, minX, maxY, minZ);
+        BufferRenderer.drawWithGlobalProgram(buffer.end());
     }
 }
