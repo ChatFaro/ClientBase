@@ -45,6 +45,14 @@ public class Panel implements IMinecraft {
         }
     }
 
+    public Category getCategory() {
+        return category;
+    }
+
+    public List<ModuleButton> getButtons() {
+        return buttons;
+    }
+
     public void mouseClicked(int mouseX, int mouseY, int button) {
         if (mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + 18) {
             if (button == 0) {

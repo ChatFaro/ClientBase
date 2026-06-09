@@ -10,6 +10,7 @@ import cn.clientbase.util.render.FontUtil;
 import cn.clientbase.util.render.RenderUtil;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.util.Formatting;
+import net.minecraft.util.math.MathHelper;
 
 import java.awt.*;
 import java.util.Comparator;
@@ -37,6 +38,11 @@ public final class ModuleList extends Drag {
         if (mc.textRenderer == null) return;
 
         final HUD hud = getModule(HUD.class);
+        if (hud.isExhibitionStyle()) {
+            renderExhibition(context, hud);
+            return;
+        }
+
         final List<Module> modules = Client.instance.getModuleManager().getModuleMap().values().stream()
                 .filter(m -> !m.isHidden() && (m.isEnabled() || m.getAnimation().getValue() > 0))
                 .filter(m -> !important.getValue() || (m.getCategory() != Category.Client && m.getCategory() != Category.Visual))
@@ -77,5 +83,44 @@ public final class ModuleList extends Drag {
         }
 
         this.height = Math.max(FontUtil.getHeight(), offsetY - renderY);
+    }
+
+    private void renderExhibition(DrawContext context, HUD hud) {
+        final List<Module> modules = Client.instance.getModuleManager().getModuleMap().values().stream()
+                .filter(m -> !m.isHidden() && (m.isEnabled() || m.getAnimation().getValue() > 0))
+                .filter(m -> !important.getValue() || (m.getCategory() != Category.Client && m.getCategory() != Category.Visual))
+                .sorted(Comparator.comparingInt((Module m) -> (int) FontUtil.getStringWidth(getDisplayName(m))).reversed().thenComparing(Module::getName))
+                .toList();
+
+        if (modules.isEmpty()) return;
+
+        float maxWidth = 0;
+        for (Module module : modules) {
+            maxWidth = Math.max(maxWidth, FontUtil.getStringWidth(getDisplayName(module)));
+        }
+        this.width = maxWidth + 2;
+
+        float y = 20;
+        float h = (mc.player != null ? mc.player.age * 3.5f : System.currentTimeMillis() / 18f) % 255f;
+        int index = 0;
+        for (Module module : modules) {
+            module.getAnimation().run(module.isEnabled() ? 1 : 0);
+            float alpha = (float) module.getAnimation().getValue();
+            if (alpha <= 0.02f) continue;
+
+            String name = getDisplayName(module);
+            float x = 4 - (1 - alpha) * 8;
+            int color = MathHelper.hsvToRgb(((h + index * 9f) / 255f) % 1f, 0.55f, 0.9f);
+            int argb = ColorUtil.applyAlpha(new Color(color), alpha).getRGB();
+            FontUtil.drawStringWithShadow(context, name, x, y, argb);
+            y += 9 * alpha;
+            index++;
+        }
+
+        this.height = Math.max(FontUtil.getHeight(), y);
+    }
+
+    private String getDisplayName(Module module) {
+        return module.getName() + (suffix.getValue() && !module.getSuffix().isEmpty() ? " " + module.getSuffix() : "");
     }
 }

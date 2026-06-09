@@ -57,9 +57,14 @@ public class KillAura extends Module {
 
     private boolean renderBlock = false;
     private boolean blocking = false;
+    private int sprintTickCounter = 0;
 
     public KillAura() {
         super("KillAura", Category.Combat);
+    }
+
+    public LivingEntity getTarget() {
+        return target;
     }
 
     @Override
@@ -78,6 +83,7 @@ public class KillAura extends Module {
         rotations = null;
         targets.clear();
         target = null;
+        sprintTickCounter = 0;
         unBlock();
     }
 
@@ -92,12 +98,14 @@ public class KillAura extends Module {
         }
 
         selectTarget();
+        updateKeepSprintState();
 
         if (target != null) {
             if (canAttack(target)) {
                 if (attackTimer.hasTimeElapsed(700L / getCps())) {
-                    attack(target);
-                    attackTimer.reset();
+                    if (attack(target)) {
+                        attackTimer.reset();
+                    }
                 }
             }
         }
@@ -153,23 +161,27 @@ public class KillAura extends Module {
         return RotationUtil.getDistanceToEntity(target) <= blockRange.getValue();
     }
 
-    private void attack(LivingEntity entity) {
-        if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
+    private boolean attack(LivingEntity entity) {
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) return false;
+        if (keepSprint.getValue() && sprintTickCounter % 2 != 0) return false;
+
+        float currentYaw = mc.player.getYaw();
+        float currentPitch = mc.player.getPitch();
+        if (RotationManager.targetRotation != null) {
+            mc.player.setYaw(RotationManager.targetRotation.getYaw());
+            mc.player.setPitch(RotationManager.targetRotation.getPitch());
+        } else if (rotations != null) {
+            mc.player.setYaw(rotations[0]);
+            mc.player.setPitch(rotations[1]);
+        }
 
         if (keepSprint.getValue()) {
-            boolean wasSprinting = mc.player.isSprinting();
-            if (wasSprinting) mc.player.setSprinting(false);
             if (attackMode.is("Packet")) {
                 PacketUtil.sendPacket(PlayerInteractEntityC2SPacket.attack(entity, mc.player.isSneaking()));
             } else {
                 mc.interactionManager.attackEntity(mc.player, entity);
             }
             mc.player.swingHand(Hand.MAIN_HAND);
-            if (wasSprinting) {
-                Vec3d v = mc.player.getVelocity();
-                mc.player.setVelocity(v.x * 0.6, v.y, v.z * 0.6);
-                mc.player.setSprinting(true);
-            }
         } else {
             if (attackMode.is("Packet")) {
                 PacketUtil.sendPacket(PlayerInteractEntityC2SPacket.attack(entity, mc.player.isSneaking()));
@@ -177,6 +189,23 @@ public class KillAura extends Module {
                 mc.interactionManager.attackEntity(mc.player, entity);
             }
             mc.player.swingHand(Hand.MAIN_HAND);
+        }
+
+        mc.player.setYaw(currentYaw);
+        mc.player.setPitch(currentPitch);
+        return true;
+    }
+
+    private void updateKeepSprintState() {
+        if (mc.player == null) return;
+        if (!keepSprint.getValue() || target == null) {
+            sprintTickCounter = 0;
+            return;
+        }
+
+        sprintTickCounter++;
+        if (sprintTickCounter % 2 == 0 && mc.player.isSprinting()) {
+            mc.player.setSprinting(false);
         }
     }
 
@@ -267,6 +296,10 @@ public class KillAura extends Module {
             min = Math.max(1, min - Velocity.attackCount);
             max = Math.max(1, max - Velocity.attackCount);
             if (min > max) min = max;
+        }
+        if (keepSprint.getValue()) {
+            min *= 2;
+            max *= 2;
         }
 
         return MathUtil.getRandomInRange(min, max);

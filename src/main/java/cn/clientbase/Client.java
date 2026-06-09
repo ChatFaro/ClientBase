@@ -36,9 +36,9 @@ public class Client implements IMinecraft {
 
     /*
     Todo List:
-    1.Fix Scaffold
+    1.Fix Scaffold @Claude :))))))))))))))))))
     2.Fix Velocity
-    3.Add KeepSprint
+    3.Add KeepSprint   Done.
     4.Add ChestStealer and InventoryManager
      */
 

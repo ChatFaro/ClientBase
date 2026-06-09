@@ -121,6 +121,16 @@ public class Scaffold extends Module {
     }
 
     @EventTarget
+    @EventPriority(1000)
+    public void onPreMotionPlace(MotionEvent event) {
+        if (mc.player == null || mc.world == null || event.isPost()) return;
+        if (!haveTarget) return;
+        if ((mode.is("Telly Bridge") || mode.is("Old Telly")) && airTicks < 1 && MovementUtil.isMoving()) return;
+        Rotation activeRotation = RotationManager.targetRotation != null ? RotationManager.targetRotation : rots;
+        tryPlace(activeRotation);
+    }
+
+    @EventTarget
     public void onPacket(PacketEvent event) {
         if (mc.player == null || event.getType() != PacketEvent.Type.Received) return;
         if (event.getPacket() instanceof net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket vel
@@ -187,8 +197,6 @@ public class Scaffold extends Module {
         }
         if (mc.player.isOnGround()) canBuildNow = true;
         // TellyBridge/OldTelly never need clutch protection — they auto-jump
-        if (mode.is("Telly Bridge") || mode.is("Old Telly")) canBuildNow = true;
-
         // --- reference rotation ---
         float refYaw   = RotationManager.prevRotation != null ? RotationManager.prevRotation.getYaw()   : mc.player.getYaw();
         float refPitch = RotationManager.prevRotation != null ? RotationManager.prevRotation.getPitch() : mc.player.getPitch();
@@ -206,8 +214,7 @@ public class Scaffold extends Module {
         }
 
         // --- clutch delayPackets path (OpenZen verbatim, not used in TellyBridge) ---
-        if (clutch.getValue() && !mode.is("Telly Bridge") && !mode.is("Old Telly")
-                && (!canBuildNow || velocityDelay > 0) && rotationDelay <= 8) {
+        if (clutch.getValue() && (!canBuildNow || velocityDelay > 0) && rotationDelay <= 8) {
             Rotation toBlock        = RotationUtil.rotationToBlock(targetSupport, 1.0f);
             Rotation previousTarget = RotationManager.targetRotation;
             rots.setYawPitch(toBlock.getYaw(), toBlock.getPitch());
@@ -259,16 +266,18 @@ public class Scaffold extends Module {
         // --- mode-specific (OpenZen verbatim) ---
         if (mode.is("Telly Bridge") || mode.is("Old Telly")) {
             mc.options.jumpKey.setPressed(MovementUtil.isMoving() || jumpHeld);
+            if (airTicks < 1 && MovementUtil.isMoving()) {
+                if (mode.is("Old Telly")) rots.setYaw(mc.player.getYaw());
+                lastRots.setYawPitch(rots.getYaw(), rots.getPitch());
+                return;
+            }
             if (mode.is("Old Telly")) rots.setYaw(mc.player.getYaw());
-            tryPlace();
         } else if (mode.is("Keep Y")) {
             mc.options.jumpKey.setPressed(MovementUtil.isMoving() || jumpHeld);
-            tryPlace();
         } else {
             if (eagle.getValue())
                 mc.options.sneakKey.setPressed(mc.player.isOnGround() && isOnBlockEdge(0.3f));
             if (snap.getValue() && !jumpHeld) resetSnap();
-            tryPlace();
         }
 
         lastRots.setYawPitch(rots.getYaw(), rots.getPitch());
@@ -285,11 +294,12 @@ public class Scaffold extends Module {
      * tryPlace — mirrors OpenZen onPreMotion gate logic.
      * Called AFTER rots has been fully set for this tick.
      */
-    private void tryPlace() {
+    private void tryPlace(Rotation activeRotation) {
         if (mc.currentScreen != null || !haveTarget) return;
-        boolean canRayTrace = RayTraceUtil.canRayTrace(rots, targetFace, targetSupport, false);
+        boolean canRayTrace = activeRotation != null
+                && RayTraceUtil.canRayTrace(activeRotation, targetFace, targetSupport, false);
         if (!canBuildNow && !isPlacementReachable()) return;
-        if (rotationDelay <= 0 && !mode.is("Old Telly") && !mode.is("Telly Bridge") && !canRayTrace) return;
+        if (rotationDelay <= 0 && !mode.is("Old Telly") && !canRayTrace) return;
         doSnap();
     }
 
@@ -300,6 +310,7 @@ public class Scaffold extends Module {
         if (targetFace == Direction.UP && !mc.player.isOnGround()
                 && MovementUtil.isMoving() && !mc.options.jumpKey.isPressed()
                 && !mode.is("Normal")) return;
+        if (!shouldBuild()) return;
 
         BlockHitResult hit = new BlockHitResult(
                 getHitVec(targetSupport, targetFace), targetFace, targetSupport, false);
@@ -374,6 +385,12 @@ public class Scaffold extends Module {
         Vec3d toBlock = hitPoint.subtract(mc.player.getEyePos());
         return toBlock.lengthSquared() <= 20.25
                 && toBlock.normalize().dotProduct(Vec3d.of(targetFace.getVector()).multiply(-1).normalize()) >= 0.0;
+    }
+
+    private boolean shouldBuild() {
+        if (mc.player == null || mc.world == null) return false;
+        BlockPos below = BlockPos.ofFloored(mc.player.getX(), mc.player.getY() - 0.5, mc.player.getZ());
+        return mc.world.getBlockState(below).isAir() && BlockUtil.isPlaceable(mc.player.getMainHandStack());
     }
 
     // =========================================================================

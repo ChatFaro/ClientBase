@@ -42,6 +42,7 @@ public class ModuleManager implements IMinecraft {
                  new Brightness(),
                  new ModuleList(),
                  new WaterMark(),
+                 new TargetHud(),
                  new CustomText(),
                  new Strafe(),
                  new WorldTweaks(),

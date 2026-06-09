@@ -32,6 +32,15 @@ public class ColorUtil implements IMinecraft {
         return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
+    public Color blend(Color first, Color second, float ratio) {
+        ratio = Math.max(0, Math.min(1, ratio));
+        int r = (int) (first.getRed() + (second.getRed() - first.getRed()) * ratio);
+        int g = (int) (first.getGreen() + (second.getGreen() - first.getGreen()) * ratio);
+        int b = (int) (first.getBlue() + (second.getBlue() - first.getBlue()) * ratio);
+        int a = (int) (first.getAlpha() + (second.getAlpha() - first.getAlpha()) * ratio);
+        return new Color(r, g, b, a);
+    }
+
     public int darken(int color) {
         int a = (color >> 24) & 0xFF;
         int r = ((color >> 16) & 0xFF) / 4;

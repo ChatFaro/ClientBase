@@ -17,6 +17,7 @@ import java.awt.*;
 
 @Getter
 public class HUD extends Module {
+    private final ModeValue visualStyle = new ModeValue("Visual Style", "ClientBase", "ClientBase", "Exhibition");
     private final ModeValue color = new ModeValue("Color Setting", "Rainbow", "Rainbow", "Dynamic", "Fade", "Astolfo", "Custom");
     private final ColorValue mainColor = new ColorValue("Main Color", new Color(183, 0, 255));
     private final ColorValue secondColor = new ColorValue("Second Color", new Color(128, 255, 255), () -> color.is("Fade"));
@@ -71,5 +72,9 @@ public class HUD extends Module {
             case "Astolfo" -> ColorUtil.getAstolfo(counter, alpha);
             default -> ColorUtil.getCustom(alpha);
         };
+    }
+
+    public boolean isExhibitionStyle() {
+        return visualStyle.is("Exhibition");
     }
 }
