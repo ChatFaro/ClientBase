@@ -69,9 +69,10 @@ public class RotationUtil implements IMinecraft {
 
         Vec3d eyePos = mc.player.getEyePos();
         if (eyePos.squaredDistanceTo(targetVec) > 4096.0) return false;
-        Vec3d lookVec = mc.player.getRotationVec(1);
-        Vec3d toTarget = targetVec.subtract(eyePos).normalize();
-        if (lookVec.dotProduct(toTarget) < 0) return false;
+        // Pure line-of-sight check (OpenZen getBestHit/isHitValid raycasts toward the point
+        // independently of head facing). The old facing dot-product gate made a target to the
+        // left/right read as "not visible" until the silent rotation snapped onto it, which
+        // dropped attacks on side targets — removed so visibility no longer depends on where we look.
         RaycastContext context = new RaycastContext(eyePos, targetVec, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player);
         return mc.world.raycast(context).getType() == HitResult.Type.MISS;
     }

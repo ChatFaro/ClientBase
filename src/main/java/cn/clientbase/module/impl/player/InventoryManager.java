@@ -58,6 +58,14 @@ public class InventoryManager extends Module {
     private final TimerUtil throwTimer = new TimerUtil();
     private int swapCooldownTicks = 0;
 
+    // OpenZen-style deferred click: a slot action is scheduled one tick, executed the next,
+    // so we never click in the same tick we read the inventory (avoids slot desync).
+    private int pendingSlot = -1;
+    private int pendingButton = 0;
+    private SlotActionType pendingAction = null;
+    private boolean hasPendingClick = false;
+    private int ticksSincePending = 0;
+
     public InventoryManager() {
         super("InventoryManager", Category.Player);
         setDescription("Automatically equips armor, sorts the hotbar and drops junk");
@@ -67,11 +75,28 @@ public class InventoryManager extends Module {
     @Override
     public void onEnable() {
         swapCooldownTicks = 0;
+        resetPending();
+    }
+
+    @Override
+    public void onDisable() {
+        resetPending();
     }
 
     @EventTarget
     public void onTick(TickEvent event) {
         if (mc.player == null || mc.interactionManager == null) return;
+
+        // OpenZen executePendingClick — perform a scheduled slot action exactly one tick later.
+        if (hasPendingClick && pendingAction != null) {
+            ticksSincePending++;
+            if (ticksSincePending >= 1) {
+                executePendingClick();
+                resetPending();
+            }
+            return;
+        }
+
         Scaffold scaffold = getModule(Scaffold.class);
         if (scaffold != null && scaffold.isEnabled()) return;
         if (ChestStealer.isRateLimited()) return;
@@ -326,11 +351,33 @@ public class InventoryManager extends Module {
         return 8 - armorSlot;
     }
 
+    /** OpenZen schedulePendingClick — queue a slot action; only one may be pending at a time. */
     private void click(int slot, int button, SlotActionType action) {
-        mc.interactionManager.clickSlot(mc.player.playerScreenHandler.syncId, slot, button, action, mc.player);
-        if (action == SlotActionType.SWAP || action == SlotActionType.QUICK_MOVE || action == SlotActionType.THROW) {
-            swapCooldownTicks = 2;
+        if (!hasPendingClick) {
+            pendingSlot = slot;
+            pendingButton = button;
+            pendingAction = action;
+            hasPendingClick = true;
+            ticksSincePending = 0;
         }
+    }
+
+    /** OpenZen executePendingClick — perform the deferred slot action. */
+    private void executePendingClick() {
+        if (pendingAction == null || mc.player == null || mc.interactionManager == null) return;
+        mc.interactionManager.clickSlot(mc.player.playerScreenHandler.syncId, pendingSlot, pendingButton, pendingAction, mc.player);
+        if (pendingAction == SlotActionType.SWAP || pendingAction == SlotActionType.QUICK_MOVE || pendingAction == SlotActionType.THROW) {
+            // don't shrink a longer cooldown already requested by the caller (e.g. armor equip = 4)
+            swapCooldownTicks = Math.max(swapCooldownTicks, 2);
+        }
+    }
+
+    private void resetPending() {
+        hasPendingClick = false;
+        pendingSlot = -1;
+        pendingButton = 0;
+        pendingAction = null;
+        ticksSincePending = 0;
     }
 
     private boolean validateSlotConfig() {

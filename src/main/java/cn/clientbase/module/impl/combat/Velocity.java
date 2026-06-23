@@ -12,8 +12,10 @@ import cn.clientbase.module.value.impl.BoolValue;
 import cn.clientbase.module.value.impl.ModeValue;
 import cn.clientbase.module.value.impl.NumberValue;
 import cn.clientbase.util.network.PacketUtil;
+import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.s2c.play.EntityAnimationS2CPacket;
@@ -54,6 +56,8 @@ public class Velocity extends Module {
 
     private int attackCooldown = 0;
     private int hitCounter = 0;
+    private boolean shouldJump = false;
+    private int sprintBoostCounter = 0;
     private Entity attackTarget = null;
     private int attacksRemaining = 0;
 
@@ -132,22 +136,25 @@ public class Velocity extends Module {
 
         if (velocity.getVelocityY() <= 0) return;
 
+        sprintBoostCounter = sprintBoostCounter % 100 + 100;
+        if (sprintBoostCounter >= 100) shouldJump = true;
+
         Entity target = getAttackTarget();
         boolean canAttack = isValidTarget(target) && mc.player.isSprinting();
-        if (!isValidTarget(target)) {
-            event.setCancelled(true);
-            scheduleMotionFlush();
-            return;
-        }
 
-        if (!mc.player.isOnGround() || !canAttack) {
+        if (!mc.player.isOnGround()) {
             isSuspending = true;
             suspendTicks = 0;
             knockbackPacket = velocity;
             event.setCancelled(true);
-        } else {
+        } else if (canAttack) {
             attackTarget = target;
             attacksRemaining = attackAmount.getValue().intValue();
+        } else {
+            isSuspending = true;
+            suspendTicks = 0;
+            knockbackPacket = velocity;
+            event.setCancelled(true);
         }
     }
 
@@ -195,11 +202,7 @@ public class Velocity extends Module {
                     suspendTicks = 0;
                     isFlushing = false;
                 } else {
-                    if (!isValidTarget(target) || !mc.player.isSprinting() || timedOut) {
-                        discardKnockback();
-                    } else {
-                        release();
-                    }
+                    release();
                     if (grounded && mc.player.isSprinting()) {
                         mc.player.setSprinting(false);
                     }
@@ -233,6 +236,18 @@ public class Velocity extends Module {
         if (jump) {
             event.setJumping(true);
             jump = false;
+        }
+        if (!mode.is("NoXZ") || mc.player == null) return;
+        // OpenZen NoXZMode#onStrafe — drive forward into the knockback to cancel X/Z.
+        if (hitCounter > 0) {
+            event.setForward(1.0f);
+        }
+        if (shouldJump) {
+            shouldJump = false;
+            if (mc.player.isOnGround() && mc.player.isSprinting()
+                    && !mc.player.hasStatusEffect(StatusEffects.JUMP_BOOST) && !shouldIgnore()) {
+                mc.player.setSprinting(true);
+            }
         }
     }
 
@@ -340,16 +355,6 @@ public class Velocity extends Module {
         suspendTicks = 0;
     }
 
-    private void discardKnockback() {
-        isFlushing = true;
-        sendMovePackets();
-        knockbackPacket = null;
-        scheduleMotionFlush();
-        isFlushing = false;
-        isSuspending = false;
-        suspendTicks = 0;
-    }
-
     private void resetSuspension() {
         isSuspending = false;
         suspendTicks = 0;
@@ -365,6 +370,8 @@ public class Velocity extends Module {
         shouldFlushMotion = false;
         flagCooldown = 0;
         hitCounter = 0;
+        shouldJump = false;
+        sprintBoostCounter = 0;
         attackCooldown = 0;
         jump = false;
         isAttacking = false;
@@ -379,8 +386,10 @@ public class Velocity extends Module {
     private boolean shouldIgnore() {
         if (mc.player == null || mc.world == null) return true;
         if (mc.player.isDead() || !mc.player.isAlive() || mc.player.getHealth() <= 0f) return true;
-        if (mc.player.isSpectator() || mc.player.getAbilities().flying || mc.player.isSleeping()) return true;
-        return mc.player.isTouchingWater() || mc.player.isInLava() || mc.player.isClimbing();
+        if (mc.player.isSpectator() || mc.player.getAbilities().flying) return true;
+        if (mc.player.isInLava() || mc.player.isOnFire() || mc.player.isTouchingWater()
+                || mc.player.isClimbing() || mc.player.isSleeping()) return true;
+        return mc.world.getBlockState(mc.player.getBlockPos()).isOf(Blocks.COBWEB);
     }
 
     private boolean isAllowedPacket(Packet<?> packet) {

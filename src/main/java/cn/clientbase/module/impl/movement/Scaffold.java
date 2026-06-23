@@ -233,9 +233,12 @@ public class Scaffold extends Module {
                     PacketUtil.sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
                             sendYaw, toBlock.getPitch(), mc.player.isOnGround(), mc.player.horizontalCollision));
                 doSnap();
-                // NOTE: no recursive onTick call — MixinClientWorld drains one packet per entity tick,
-                // which naturally re-invokes the normal tick flow next frame.
+                // OpenZen Scaffold#onTick verbatim — recurse so the placement queue is refilled
+                // within the same drain, laying down multiple blocks per jump (bounded by
+                // rotationDelay <= 8). Removing this is what rate-limited Telly to one block/jump.
+                onTick(event);
             });
+            lastRots.setYawPitch(rots.getYaw(), rots.getPitch());
             return;
         }
 

@@ -51,6 +51,12 @@ public class ChestStealer extends Module {
     private int stealIndex = 0;
     private boolean queueBuilt = false;
 
+    // OpenZen-style deferred click: a slot is scheduled one tick, executed the next.
+    private GenericContainerScreenHandler pendingMenu = null;
+    private int pendingSlot = -1;
+    private boolean hasPendingClick = false;
+    private int ticksSinceMenu = 0;
+
     public ChestStealer() {
         super("ChestStealer", Category.Player);
         setDescription("Automatically steals useful items from containers");
@@ -63,6 +69,7 @@ public class ChestStealer extends Module {
     @Override
     public void onDisable() {
         resetQueue();
+        resetState();
         lastScreen = null;
         openTicks = 0;
     }
@@ -70,6 +77,17 @@ public class ChestStealer extends Module {
     @EventTarget
     public void onTick(TickEvent event) {
         if (mc.player == null || mc.interactionManager == null) return;
+
+        // OpenZen onGameTick — execute a scheduled click exactly one tick after it was queued,
+        // so we never click in the same tick we read the container (avoids slot desync).
+        if (hasPendingClick && pendingMenu != null && pendingSlot >= 0) {
+            ticksSinceMenu++;
+            if (ticksSinceMenu >= 1) {
+                executePendingClick();
+                resetState();
+            }
+            return;
+        }
 
         KillAura aura = getModule(KillAura.class);
         Scaffold scaffold = getModule(Scaffold.class);
@@ -120,7 +138,7 @@ public class ChestStealer extends Module {
         while (stealIndex < stealQueue.size()) {
             StealTarget target = stealQueue.get(stealIndex++);
             if (!handler.getSlot(target.slot()).getStack().isEmpty()) {
-                click(handler, target.slot());
+                schedulePendingClick(handler, target.slot());
                 return;
             }
         }
@@ -131,7 +149,7 @@ public class ChestStealer extends Module {
         List<Integer> slots = getStealableSlots(handler);
         if (slots.isEmpty()) return;
         int slot = randomClick.getValue() ? slots.get(random.nextInt(slots.size())) : slots.get(0);
-        click(handler, slot);
+        schedulePendingClick(handler, slot);
     }
 
     private void buildQueue(GenericContainerScreenHandler handler) {
@@ -291,10 +309,30 @@ public class ChestStealer extends Module {
         return total;
     }
 
-    private void click(GenericContainerScreenHandler handler, int slot) {
-        lastClickDelayMs = delay.getValue().longValue();
-        mc.interactionManager.clickSlot(handler.syncId, slot, 0, SlotActionType.QUICK_MOVE, mc.player);
-        stealTimer.reset();
+    /** OpenZen schedulePendingClick — queue a click; only one may be pending at a time. */
+    private void schedulePendingClick(GenericContainerScreenHandler handler, int slot) {
+        if (!hasPendingClick) {
+            pendingMenu = handler;
+            pendingSlot = slot;
+            hasPendingClick = true;
+            ticksSinceMenu = 0;
+        }
+    }
+
+    /** OpenZen executePendingClick — perform the deferred shift-click. */
+    private void executePendingClick() {
+        if (pendingMenu != null && pendingSlot >= 0) {
+            lastClickDelayMs = delay.getValue().longValue();
+            mc.interactionManager.clickSlot(pendingMenu.syncId, pendingSlot, 0, SlotActionType.QUICK_MOVE, mc.player);
+            stealTimer.reset();
+        }
+    }
+
+    private void resetState() {
+        hasPendingClick = false;
+        pendingSlot = -1;
+        pendingMenu = null;
+        ticksSinceMenu = 0;
     }
 
     private void resetQueue() {

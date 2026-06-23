@@ -17,6 +17,7 @@ import cn.clientbase.util.player.RotationUtil;
 import lombok.Getter;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.SwordItem;
+import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
@@ -57,7 +58,6 @@ public class KillAura extends Module {
 
     private boolean renderBlock = false;
     private boolean blocking = false;
-    private int sprintTickCounter = 0;
 
     public KillAura() {
         super("KillAura", Category.Combat);
@@ -83,7 +83,6 @@ public class KillAura extends Module {
         rotations = null;
         targets.clear();
         target = null;
-        sprintTickCounter = 0;
         unBlock();
     }
 
@@ -98,15 +97,11 @@ public class KillAura extends Module {
         }
 
         selectTarget();
-        updateKeepSprintState();
 
-        if (target != null) {
-            if (canAttack(target)) {
-                if (attackTimer.hasTimeElapsed(700L / getCps())) {
-                    if (attack(target)) {
-                        attackTimer.reset();
-                    }
-                }
+        if (target != null && canAttack(target)
+                && attackTimer.hasTimeElapsed(700L / getCps())) {
+            if (attack(target)) {
+                attackTimer.reset();
             }
         }
     }
@@ -163,7 +158,6 @@ public class KillAura extends Module {
 
     private boolean attack(LivingEntity entity) {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return false;
-        if (keepSprint.getValue() && sprintTickCounter % 2 != 0) return false;
 
         float currentYaw = mc.player.getYaw();
         float currentPitch = mc.player.getPitch();
@@ -175,38 +169,32 @@ public class KillAura extends Module {
             mc.player.setPitch(rotations[1]);
         }
 
-        if (keepSprint.getValue()) {
-            if (attackMode.is("Packet")) {
-                PacketUtil.sendPacket(PlayerInteractEntityC2SPacket.attack(entity, mc.player.isSneaking()));
-            } else {
-                mc.interactionManager.attackEntity(mc.player, entity);
-            }
-            mc.player.swingHand(Hand.MAIN_HAND);
+        // Keep Sprint (rebound-free): reset sprint ONLY around this hit. We tell the server we
+        // stopped sprinting just before the attack packet and resume right after — so the hit is
+        // registered as a non-sprint attack (no sprint knockback rebound) and momentum is kept.
+        // The client sprint flag is toggled only for the duration of the attack call, so Velocity's
+        // AntiKB (which reads mc.player.isSprinting()) still sees it as true everywhere else.
+        boolean resetSprint = keepSprint.getValue() && mc.player.isSprinting();
+        if (resetSprint) {
+            PacketUtil.sendPacketNoEvent(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.STOP_SPRINTING));
+            mc.player.setSprinting(false);
+        }
+
+        if (attackMode.is("Packet")) {
+            PacketUtil.sendPacket(PlayerInteractEntityC2SPacket.attack(entity, mc.player.isSneaking()));
         } else {
-            if (attackMode.is("Packet")) {
-                PacketUtil.sendPacket(PlayerInteractEntityC2SPacket.attack(entity, mc.player.isSneaking()));
-            } else {
-                mc.interactionManager.attackEntity(mc.player, entity);
-            }
-            mc.player.swingHand(Hand.MAIN_HAND);
+            mc.interactionManager.attackEntity(mc.player, entity);
+        }
+        mc.player.swingHand(Hand.MAIN_HAND);
+
+        if (resetSprint) {
+            mc.player.setSprinting(true);
+            PacketUtil.sendPacketNoEvent(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_SPRINTING));
         }
 
         mc.player.setYaw(currentYaw);
         mc.player.setPitch(currentPitch);
         return true;
-    }
-
-    private void updateKeepSprintState() {
-        if (mc.player == null) return;
-        if (!keepSprint.getValue() || target == null) {
-            sprintTickCounter = 0;
-            return;
-        }
-
-        sprintTickCounter++;
-        if (sprintTickCounter % 2 == 0 && mc.player.isSprinting()) {
-            mc.player.setSprinting(false);
-        }
     }
 
     public void block() {
@@ -296,10 +284,6 @@ public class KillAura extends Module {
             min = Math.max(1, min - Velocity.attackCount);
             max = Math.max(1, max - Velocity.attackCount);
             if (min > max) min = max;
-        }
-        if (keepSprint.getValue()) {
-            min *= 2;
-            max *= 2;
         }
 
         return MathUtil.getRandomInRange(min, max);
