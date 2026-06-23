@@ -1,6 +1,8 @@
 package cn.clientbase.ui.clickgui;
 
+import cn.clientbase.Client;
 import cn.clientbase.module.Category;
+import cn.clientbase.module.impl.visual.ClickGUI;
 import cn.clientbase.module.impl.visual.HUD;
 import cn.clientbase.util.IMinecraft;
 import cn.clientbase.util.render.FontUtil;
@@ -80,7 +82,9 @@ public class ClickGUIScreen extends Screen implements IMinecraft {
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (isExhibition()) {
-            if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_RIGHT_SHIFT || keyCode == GLFW.GLFW_KEY_INSERT || keyCode == GLFW.GLFW_KEY_DELETE) {
+            ClickGUI clickGUI = Client.instance.getModuleManager().getModule(ClickGUI.class);
+            int boundKey = clickGUI != null ? clickGUI.getKey() : GLFW.GLFW_KEY_RIGHT_SHIFT;
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == boundKey) {
                 close();
                 return true;
             }
@@ -119,7 +123,7 @@ public class ClickGUIScreen extends Screen implements IMinecraft {
     }
 
     private boolean isExhibition() {
-        HUD hud = instance.getModuleManager().getModule(HUD.class);
+        HUD hud = Client.instance.getModuleManager().getModule(HUD.class);
         return hud != null && hud.isExhibitionStyle();
     }
 
@@ -146,7 +150,7 @@ public class ClickGUIScreen extends Screen implements IMinecraft {
             int text = selected ? 0xFFFFFFFF : hovered ? 0xFFCCCCCC : 0xFF777777;
             if (selected) {
                 RenderUtil.drawRect(context, exX + 3, catY, 37, 36, 0xFF1C1C1C);
-                RenderUtil.drawRect(context, exX + 3, catY, 1, 36, instance.getModuleManager().getModule(HUD.class).getColor(2));
+                RenderUtil.drawRect(context, exX + 3, catY, 1, 36, Client.instance.getModuleManager().getModule(HUD.class).getColor(2));
             }
             String icon = category.getName().substring(0, 1);
             FontUtil.drawStringWithShadow(context, icon, exX + 20 - FontUtil.getStringWidth(icon) / 2f, catY + 14, text);

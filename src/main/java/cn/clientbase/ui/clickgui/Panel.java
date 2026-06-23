@@ -23,7 +23,7 @@ public class Panel implements IMinecraft {
         this.x = x;
         this.y = y;
 
-        instance.getModuleManager().getModuleMap().values().stream()
+        Client.instance.getModuleManager().getModuleMap().values().stream()
                 .filter(m -> m.getCategory() == category)
                 .forEach(m -> buttons.add(new ModuleButton(m)));
     }

@@ -5,6 +5,7 @@ import com.google.gson.*;
 import cn.clientbase.Client;
 import cn.clientbase.config.Config;
 import cn.clientbase.module.Module;
+import cn.clientbase.module.impl.visual.ClickGUI;
 import cn.clientbase.module.value.Value;
 import cn.clientbase.module.value.impl.*;
 
@@ -29,7 +30,7 @@ public final class ModuleConfig extends Config {
 
             for (final Module module : instance.getModuleManager().getModuleMap().values()) {
                 final JsonObject moduleObject = new JsonObject();
-                moduleObject.addProperty("enabled", module.isEnabled());
+                moduleObject.addProperty("enabled", !(module instanceof ClickGUI) && module.isEnabled());
                 moduleObject.addProperty("key", module.getKey());
 
                 if (module instanceof Drag drag) {
@@ -101,7 +102,7 @@ public final class ModuleConfig extends Config {
     private void deserializeModule(final Module module, final JsonObject moduleObject) {
         if (moduleObject.has("enabled")) {
             final boolean shouldEnable = moduleObject.get("enabled").getAsBoolean();
-            if (shouldEnable != module.isEnabled()) {
+            if (!(module instanceof ClickGUI) && shouldEnable != module.isEnabled()) {
                 module.toggle();
             }
         }

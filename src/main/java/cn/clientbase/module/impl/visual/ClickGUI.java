@@ -2,6 +2,7 @@ package cn.clientbase.module.impl.visual;
 
 import cn.clientbase.module.Category;
 import cn.clientbase.module.Module;
+import cn.clientbase.ui.clickgui.ClickGUIScreen;
 import org.lwjgl.glfw.GLFW;
 
 public final class ClickGUI extends Module {
@@ -14,9 +15,12 @@ public final class ClickGUI extends Module {
 
     @Override
     public void onEnable() {
-        if (mc.player == null || mc.world == null) return;
+        openScreen();
+        setEnabled(false);
+    }
 
-        mc.setScreen(instance.getClickGUIScreen());
-        toggle();
+    public void openScreen() {
+        if (mc.player == null || mc.world == null) return;
+        mc.setScreen(new ClickGUIScreen());
     }
 }

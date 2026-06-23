@@ -27,7 +27,7 @@ public class ModuleManager implements IMinecraft {
     private final Map<String, Module> moduleMap = new LinkedHashMap<>();
 
     public ModuleManager() {
-        instance.getEventManager().register(this);
+        Client.instance.getEventManager().register(this);
 
         addModules(
                  new Sprint(),
@@ -99,6 +99,11 @@ public class ModuleManager implements IMinecraft {
 
         for (Module module : moduleMap.values()) {
             if (module.getKey() == event.getKey()) {
+                if (module instanceof ClickGUI clickGUI) {
+                    clickGUI.openScreen();
+                    clickGUI.setEnabled(false);
+                    return;
+                }
                 module.toggle();
             }
         }

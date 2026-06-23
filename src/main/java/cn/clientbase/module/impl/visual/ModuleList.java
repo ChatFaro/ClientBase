@@ -108,11 +108,16 @@ public final class ModuleList extends Drag {
             float alpha = (float) module.getAnimation().getValue();
             if (alpha <= 0.02f) continue;
 
-            String name = getDisplayName(module);
+            String moduleName = module.getName();
+            String suffixName = suffix.getValue() && !module.getSuffix().isEmpty() ? " " + module.getSuffix() : "";
             float x = 4 - (1 - alpha) * 8;
             int color = MathHelper.hsvToRgb(((h + index * 9f) / 255f) % 1f, 0.55f, 0.9f);
             int argb = ColorUtil.applyAlpha(new Color(color), alpha).getRGB();
-            FontUtil.drawStringWithShadow(context, name, x, y, argb);
+            FontUtil.drawStringWithShadow(context, moduleName, x, y, argb);
+            if (!suffixName.isEmpty()) {
+                FontUtil.drawStringWithShadow(context, suffixName, x + FontUtil.getStringWidth(moduleName), y,
+                        ColorUtil.applyAlpha(new Color(190, 190, 190), alpha).getRGB());
+            }
             y += 9 * alpha;
             index++;
         }
